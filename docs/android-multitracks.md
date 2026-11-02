@@ -18,11 +18,18 @@ Status: definição de escopo; ainda não existe aplicativo executável ou APK n
 - Sinalizar arquivos ausentes ou incompatíveis antes de iniciar a reprodução.
 - Evitar iniciar a próxima música automaticamente na primeira versão.
 
-## Decisão necessária antes do motor de áudio
+## Saída de áudio definida
 
-Qual será a ligação do celular com a mesa: saída de fone/adaptador ou interface de áudio USB? Também é necessário conhecer o modelo da interface e o número de saídas desejado.
+O usuário definiu VS mono, com L para fone e R para PA.
 
-Projetar modos de roteamento após essa resposta. Uma proposta de modo com dois canais é bases em um canal e clique/guia no outro, abrindo mão do estéreo das bases. Saídas independentes adicionais dependem do dispositivo e da compatibilidade real, a validar no Android alvo.
+| Canal | Destino | Conteúdo planejado |
+| --- | --- | --- |
+| L (esquerdo) | Fone/retorno | Clique e guia |
+| R (direito) | PA/mesa | VS/bases em mono |
+
+Manter os dois canais separados na mixagem final. Clique e guia não devem ser enviados ao R, inclusive durante solo, retomada e troca de música. A necessidade de incluir bases também no fone ainda não foi definida.
+
+O dispositivo físico e os cabos usados para separar L/R ainda precisam ser identificados para os testes. A configuração foi registrada; a saída real só estará validada após teste no aparelho.
 
 ## Validação para liberar uma versão de teste
 
