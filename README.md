@@ -2,9 +2,9 @@
 
 ## Baixar para Windows
 
-[**Baixar o Palco Multitracks 0.3.0 para Windows**](./Palco-Multitracks-0.3.0-Windows-x64-Setup.exe?raw=1)
+[**Baixar o Palco Multitracks 0.3.1 para Windows**](./Palco-Multitracks-0.3.1-Windows-x64-Setup.exe?raw=1)
 
-O instalador fica na página inicial e inclui a versão no nome. A versão atual é a **0.3.0**, para Windows 10 ou posterior em 64 bits.
+O instalador fica na página inicial e inclui a versão no nome. A versão atual é a **0.3.1**, para Windows 10 ou posterior em 64 bits.
 
 O código-fonte e os instaladores identificados por versão estão na pasta [`palco`](./palco/).
 

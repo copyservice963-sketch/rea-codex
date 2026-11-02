@@ -43,6 +43,13 @@ try {
     assert.equal(await page.getByRole('button', { name: 'Reproduzir', exact: true }).isDisabled(), true);
     assert.equal(await page.getByRole('button', { name: /ARRANJO/ }).getAttribute('aria-selected'), 'true');
     assert.equal(await page.locator('#audio-device option').count() >= 1, true);
+    assert.equal(await page.locator('#project-state').textContent(), 'SALVO');
+    await page.locator('#song-name').focus(); await page.locator('#song-name').blur();
+    assert.equal(await page.locator('#undo').isDisabled(), true);
+    await page.getByRole('button', { name: 'Ajuda' }).click();
+    await page.getByRole('button', { name: 'Mostrar atalhos' }).click();
+    assert.equal(await page.locator('#shortcuts-dialog').getAttribute('open'), '');
+    await page.getByRole('button', { name: 'Fechar atalhos' }).click();
     await page.getByRole('button', { name: 'Testar áudio' }).click();
     await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('Tom de teste'));
     await page.screenshot({ path: resolve(output, 'empty-session.png'), fullPage: true });
@@ -97,6 +104,16 @@ try {
     });
     assert.deepEqual(result, { playing: false, sources: 0 });
   });
+  await check('Metronome keeps a bounded lookahead queue', async () => {
+    const count = await page.evaluate(async () => {
+      const { AudioEngine } = await import('/audio-engine.mjs');
+      const ctx = new AudioContext(), engine = new AudioEngine(ctx);
+      engine.add(ctx.createBuffer(1, 3000 * 600, 3000), 'Longa');
+      engine.setTempo(300, true); engine.schedule(ctx.currentTime + 0.01);
+      const count = engine.clicks.length; engine.pause(); await ctx.close(); return count;
+    });
+    assert.ok(count > 0 && count < 20, `fila do metrônomo fora do limite: ${count}`);
+  });
   await check('Import two WAVs, draw waveforms and display safe filenames', async () => {
     await page.locator('#files').setInputFiles([
       { name: '01 - Base.wav', mimeType: 'audio/wav', buffer: wav(440) },
@@ -107,6 +124,7 @@ try {
     assert.equal(await page.locator('.track-name').nth(1).textContent(), '02 - Guia <teste>.wav');
     assert.ok(await page.locator('canvas').first().evaluate(c => c.width > 0));
     assert.match(await page.locator('#total').textContent(), /00:04.000/);
+    assert.equal(await page.locator('#project-state').textContent(), 'NÃO SALVO');
     await page.screenshot({ path: resolve(output, 'loaded-session.png'), fullPage: true });
   });
   await check('Playback advances, pause holds position, resume continues, stop resets', async () => {
@@ -136,6 +154,13 @@ try {
     assert.equal(await page.locator('.mixer-strip').first().locator('[data-control=pan]').inputValue(), '-1');
     await page.locator('#master').fill('0.6'); assert.equal(await page.locator('#master-value').textContent(), '60%');
   });
+  await check('Track rename is mirrored in the mixer and can be undone', async () => {
+    const name = page.locator('.track-name').first();
+    await name.fill('Voz principal'); await name.press('Enter');
+    assert.equal(await page.locator('.mixer-strip .strip-name').first().textContent(), 'Voz principal');
+    await page.locator('#undo').click();
+    assert.equal(await page.locator('.track-name').first().textContent(), '01 - Base.wav');
+  });
   await check('Timeline start, markers, tempo, metronome, undo and project export work', async () => {
     const start = page.locator('.track').first().locator('[data-control=start]');
     await start.fill('1'); await start.press('Enter');
@@ -164,6 +189,18 @@ try {
     assert.equal(project.version, 1);
     assert.equal(project.songs[0].tracks.length, 2);
     assert.ok(project.songs[0].tracks[0].audioBase64.length > 1000);
+    assert.equal(await page.locator('#project-state').textContent(), 'SALVO');
+
+    await page.locator('#song-name').fill('Alterado depois de salvar'); await page.locator('#song-name').press('Enter');
+    await page.locator('#song-name').blur();
+    assert.equal(await page.locator('#project-state').textContent(), 'NÃO SALVO');
+    await page.locator('#project-file').setInputFiles({
+      name: 'restaurado.palco.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(project))
+    });
+    await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('Projeto aberto'));
+    assert.equal(await page.locator('#song-name').inputValue(), 'Música 1');
+    assert.equal(await page.locator('.track').count(), 2);
+    assert.equal(await page.locator('#project-state').textContent(), 'SALVO');
   });
   await check('Seek and natural end stop without automatically starting another song', async () => {
     await page.locator('#seek').fill('3.7');
@@ -203,6 +240,14 @@ try {
     assert.equal(await page.locator('.track').count(), 0);
     assert.equal(await page.locator('#empty').isVisible(), true);
     assert.equal(await page.locator('#play').isDisabled(), true);
+  });
+  await check('Unsaved project is not discarded when confirmation is canceled', async () => {
+    assert.equal(await page.locator('#project-state').textContent(), 'NÃO SALVO');
+    const count = await page.locator('#song-count').textContent();
+    await page.evaluate(() => { window.confirm = () => false; });
+    await page.locator('#new-project').click();
+    await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('cancelado'));
+    assert.equal(await page.locator('#song-count').textContent(), count);
     assert.deepEqual(errors, []);
   });
   await writeFile(resolve(output, 'results.json'), JSON.stringify({ browser: await browser.version(), results }, null, 2));

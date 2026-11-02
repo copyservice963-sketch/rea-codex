@@ -1,10 +1,10 @@
-# Palco Multitracks 0.3.0
+# Palco Multitracks 0.3.1
 
 Aplicativo próprio para Windows 10/11 x64, destinado a reproduzir multitracks ao vivo. Implementação em Electron e Web Audio, com interface em português. O código, os gráficos de forma de onda e o instalador são próprios; nenhum binário, ícone ou plugin do REAPER integra este aplicativo.
 
 ## Instalar e usar
 
-O instalador é gerado em `release/Palco-Multitracks-0.3.0-Windows-x64-Setup.exe`. Execute no Windows, escolha a pasta e abra **Palco Multitracks** pelo atalho. A instalação é por usuário, sem exigir privilégios de administrador. Há desinstalador e registro na lista de aplicativos do Windows. O pacote de teste não possui assinatura digital.
+O instalador é gerado em `release/Palco-Multitracks-0.3.1-Windows-x64-Setup.exe`. Execute no Windows, escolha a pasta e abra **Palco Multitracks** pelo atalho. A instalação é por usuário, sem exigir privilégios de administrador. Há desinstalador e registro na lista de aplicativos do Windows. O pacote de teste não possui assinatura digital.
 
 1. Na barra **Saída de áudio**, selecione o dispositivo do Windows e clique em **Testar áudio**. O indicador deve mudar para **Áudio ativo** e um tom curto deve ser ouvido.
 2. Clique em **+ Faixas** e selecione os áudios de uma mesma música.
@@ -15,6 +15,8 @@ O instalador é gerado em `release/Palco-Multitracks-0.3.0-Windows-x64-Setup.exe
 7. Defina o início de cada faixa na timeline, adicione marcadores, configure o BPM e ative o metrônomo quando necessário.
 8. Use **Salvar** para criar um arquivo `.palco.json` com playlist, áudio e ajustes. **Abrir** restaura o projeto.
 9. Abra **Playlist** e use **Adicionar música** para montar o repertório. Cada música mantém suas próprias faixas e ajustes.
+
+As faixas podem ser renomeadas diretamente no painel e arrastadas horizontalmente na timeline. O indicador **SALVO/NÃO SALVO** mostra se existem alterações pendentes. Novo, Abrir e fechar o programa pedem confirmação somente quando há mudanças não salvas.
 
 Atalhos: `Ctrl+N` cria um projeto, `Ctrl+O` abre, `Ctrl+S` salva, `Ctrl+Z` desfaz, `Ctrl+Y` refaz, `M` adiciona marcador, Espaço reproduz/pausa e Esc para.
 
@@ -56,7 +58,7 @@ npm test
 
 Os testes usam Chromium disponível em `/usr/bin/chromium`. Para outro local, configure `CHROMIUM_PATH` com o caminho do executável. Eles criam arquivos WAV sintéticos e exercitam o motor real de Web Audio e a interface, sem usar arquivos do REAPER. Resultados e capturas aparecem em `test-results/`.
 
-Onze verificações cobrem interface DAW, diagnóstico de áudio, mistura e pan por amostra, cancelamento de início pendente, importação, transporte, controles de mixagem, timeline, marcadores, tempo, metrônomo, histórico, exportação de projeto, fim natural, arquivo inválido, playlist com músicas separadas e remoção de faixas. O instalador e a reprodução no Windows real ainda precisam ser exercitados antes de uso ao vivo.
+Quatorze verificações cobrem interface e menus, diagnóstico de áudio, mistura e pan por amostra, cancelamento de início pendente, fila limitada do metrônomo, importação, transporte, renomeação, controles de mixagem, timeline, marcadores, tempo, histórico sem estados vazios, exportação/restauração de projeto, proteção contra descarte, fim natural, arquivo inválido, playlist com músicas separadas e remoção de faixas. O instalador e a reprodução no Windows real ainda precisam ser exercitados antes de uso ao vivo.
 
 O build Windows x64 concluiu com sucesso. O instalador NSIS passou no teste de arquivo do 7-Zip; o executável e o ASAR extraídos dele correspondem byte a byte aos arquivos empacotados, e os fontes no ASAR correspondem aos fontes testados. O pacote contém desinstalador. Isso verifica a composição do pacote, sem substituir um teste de instalação no Windows.
 

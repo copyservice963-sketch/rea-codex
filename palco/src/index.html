@@ -10,9 +10,10 @@
 <body>
   <header class="menu-bar">
     <a class="brand" href="#" aria-label="Palco Multitracks"><span class="brand-mark">P</span><strong>PALCO</strong><small>MULTITRACKS</small></a>
-    <nav class="app-menu" aria-label="Menu principal"><span>Arquivo</span><span>Editar</span><span>Exibir</span><span>Faixa</span><span>Opções</span><span>Ajuda</span></nav>
+    <nav class="app-menu" aria-label="Menu principal"><button data-menu="file">Arquivo</button><button data-menu="edit">Editar</button><button data-menu="view">Exibir</button><button data-menu="track">Faixa</button><button data-menu="options">Opções</button><button data-menu="help">Ajuda</button></nav>
     <div class="audio-indicator"><i id="audio-led"></i><span id="audio-state">ÁUDIO SUSPENSO</span></div>
   </header>
+  <div id="menu-popup" class="menu-popup" hidden></div>
 
   <div class="tool-bar">
     <div class="tool-group">
@@ -20,9 +21,12 @@
       <button id="open-project" class="tool-button" title="Abrir projeto (Ctrl+O)">Abrir</button>
       <button id="save-project" class="tool-button" title="Salvar projeto (Ctrl+S)">Salvar</button>
       <input id="project-file" type="file" accept=".json,.palco.json" hidden>
+      <input id="files" type="file" accept=".wav,.mp3,.ogg,.flac,audio/*" multiple hidden>
+    </div>
+    <div class="tool-separator"></div>
+    <div class="tool-group">
       <button id="new-song" class="tool-button" title="Nova música">＋ Música</button>
       <button id="import" class="tool-button primary" title="Importar faixas">＋ Faixas</button>
-      <input id="files" type="file" accept=".wav,.mp3,.ogg,.flac,audio/*" multiple hidden>
     </div>
     <div class="tool-separator"></div>
     <div class="tool-group history-tools"><button id="undo" class="icon-button" title="Desfazer (Ctrl+Z)" disabled>↶</button><button id="redo" class="icon-button" title="Refazer (Ctrl+Y)" disabled>↷</button><button id="add-marker" class="tool-button" title="Adicionar marcador na posição atual (M)">＋ Marcador</button></div>
@@ -41,7 +45,7 @@
     <section id="arrangement-view" class="view-panel active">
       <div class="project-strip">
         <div><span class="section-label">PROJETO ATUAL</span><input id="song-name" class="song-name" value="Música 1" aria-label="Nome da música"></div>
-        <div class="project-stats"><span id="track-count">0 faixas</span><span id="song-duration">00:00.000</span><label>BPM <input id="tempo" type="number" min="30" max="300" value="120" aria-label="Tempo em BPM"></label><button id="metronome" aria-pressed="false" title="Metrônomo">METRÔNOMO</button><span>48 kHz</span></div>
+        <div class="project-stats"><span id="project-state">SALVO</span><span id="track-count">0 faixas</span><span id="song-duration">00:00.000</span><label>BPM <input id="tempo" type="number" min="30" max="300" value="120" aria-label="Tempo em BPM"></label><button id="metronome" aria-pressed="false" title="Metrônomo">METRÔNOMO</button><span>48 kHz</span></div>
       </div>
 
       <section class="arrange-window" aria-label="Arranjo de multitracks">
@@ -86,6 +90,12 @@
     <div class="seek-wrap"><label for="seek">POSIÇÃO <span id="play-state">PARADO</span></label><input id="seek" type="range" min="0" max="1" step="any" value="0" aria-label="Posição de reprodução" disabled></div>
     <div class="master"><label for="master">MASTER <span id="master-value">80%</span></label><input id="master" type="range" min="0" max="1" step="0.01" value="0.8" aria-label="Volume master"></div>
   </footer>
+
+  <dialog id="shortcuts-dialog" class="shortcuts-dialog">
+    <form method="dialog"><button aria-label="Fechar atalhos">×</button></form>
+    <h2>Atalhos do Palco</h2>
+    <dl><dt>Ctrl+N</dt><dd>Novo projeto</dd><dt>Ctrl+O</dt><dd>Abrir projeto</dd><dt>Ctrl+S</dt><dd>Salvar projeto</dd><dt>Ctrl+Z / Ctrl+Y</dt><dd>Desfazer / refazer</dd><dt>Espaço</dt><dd>Reproduzir ou pausar</dd><dt>Esc</dt><dd>Parar</dd><dt>M</dt><dd>Adicionar marcador</dd></dl>
+  </dialog>
 
   <script type="module" src="app.mjs"></script>
 </body>

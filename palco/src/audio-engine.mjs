@@ -16,6 +16,9 @@ export class AudioEngine {
     this.tracks = [];
     this.sources = [];
     this.clicks = [];
+    this.metronomeTimer = null;
+    this.nextBeat = 0;
+    this.metronomeStart = 0;
     this.playing = false;
     this.offset = 0;
     this.startedAt = 0;
@@ -135,22 +138,39 @@ export class AudioEngine {
       source.start(when + delay, sourceOffset);
       this.sources.push({ source, gain, panner, track });
     }
-    if (this.metronome) this.scheduleMetronome(when);
+    if (this.metronome) this.startMetronome(when);
   }
 
-  scheduleMetronome(when) {
+  startMetronome(when) {
     const beat = 60 / this.tempo;
-    const first = Math.ceil(this.offset / beat) * beat;
-    for (let position = first, count = 0; position <= this.duration && count < 10000; position += beat, count++) {
+    this.nextBeat = Math.ceil(this.offset / beat) * beat;
+    this.metronomeStart = when;
+    this.fillMetronomeQueue();
+    this.metronomeTimer = setInterval(() => this.fillMetronomeQueue(), 200);
+  }
+
+  fillMetronomeQueue() {
+    if (!this.playing || !this.metronome) return;
+    const beat = 60 / this.tempo;
+    const projectNow = this.offset + Math.max(0, this.context.currentTime - this.metronomeStart);
+    const horizon = Math.min(this.duration, projectNow + 2);
+    while (this.nextBeat <= horizon) {
+      const position = this.nextBeat;
       const oscillator = this.context.createOscillator();
       const gain = this.context.createGain();
-      const start = when + position - this.offset;
+      const start = this.metronomeStart + position - this.offset;
       oscillator.frequency.value = Math.round(position / beat) % 4 === 0 ? 1320 : 880;
       gain.gain.setValueAtTime(0.12, start);
       gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.045);
       oscillator.connect(gain); gain.connect(this.master);
       oscillator.start(start); oscillator.stop(start + 0.05);
-      this.clicks.push({ oscillator, gain });
+      const click = { oscillator, gain };
+      this.clicks.push(click);
+      oscillator.addEventListener('ended', () => {
+        oscillator.disconnect(); gain.disconnect();
+        this.clicks = this.clicks.filter(candidate => candidate !== click);
+      }, { once: true });
+      this.nextBeat += beat;
     }
   }
 
@@ -163,6 +183,8 @@ export class AudioEngine {
       source.disconnect(); gain.disconnect(); panner.disconnect();
     }
     this.sources = [];
+    if (this.metronomeTimer) clearInterval(this.metronomeTimer);
+    this.metronomeTimer = null;
     for (const { oscillator, gain } of this.clicks) {
       try { oscillator.stop(); } catch {}
       oscillator.disconnect(); gain.disconnect();

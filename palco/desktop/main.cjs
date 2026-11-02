@@ -63,6 +63,15 @@ app.whenReady().then(() => {
     if (result.canceled || !result.filePaths[0]) return { canceled: true };
     return { canceled: false, path: result.filePaths[0], content: await fs.readFile(result.filePaths[0], 'utf8') };
   });
+  ipcMain.handle('project:confirm-discard', async event => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showMessageBox(owner, {
+      type: 'warning', buttons: ['Continuar editando', 'Descartar alterações'],
+      defaultId: 0, cancelId: 0, title: 'Alterações não salvas',
+      message: 'Descartar as alterações não salvas do projeto atual?'
+    });
+    return result.response === 1;
+  });
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => callback(permission === 'speaker-selection'));
   session.defaultSession.setPermissionCheckHandler((_webContents, permission) => permission === 'speaker-selection');
   const splash = openSplash();
