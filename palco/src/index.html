@@ -8,35 +8,81 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="#" aria-label="Palco Multitracks"><span class="brand-icon">▥</span> palco<span class="brand-caption">MULTITRACKS</span></a>
-    <span class="project-name">Sessão ao vivo <span>•</span> <small>Nova sessão</small></span>
-    <span class="local-badge"><i></i> Áudio local · Offline</span>
+  <header class="menu-bar">
+    <a class="brand" href="#" aria-label="Palco Multitracks"><span class="brand-mark">P</span><strong>PALCO</strong><small>MULTITRACKS</small></a>
+    <nav class="app-menu" aria-label="Menu principal"><span>Arquivo</span><span>Editar</span><span>Exibir</span><span>Faixa</span><span>Opções</span><span>Ajuda</span></nav>
+    <div class="audio-indicator"><i id="audio-led"></i><span id="audio-state">ÁUDIO SUSPENSO</span></div>
   </header>
-  <main>
-    <section class="heading">
-      <div><p class="eyebrow">SEU SOM. NO MESMO TEMPO.</p><h1>Pronto para o palco.</h1><p class="subtitle">Suas faixas, uma só performance. Importe os áudios para começar.</p></div>
-      <button id="import" class="primary"><span>＋</span> Importar faixas</button>
+
+  <div class="tool-bar">
+    <div class="tool-group">
+      <button id="new-song" class="tool-button" title="Nova música">＋ Música</button>
+      <button id="import" class="tool-button primary" title="Importar faixas">＋ Faixas</button>
       <input id="files" type="file" accept=".wav,.mp3,.ogg,.flac,audio/*" multiple hidden>
-    </section>
-    <section class="workspace" aria-label="Sessão de multitracks">
-      <div class="session-bar"><div><span class="session-dot"></span> MIXAGEM <span id="track-count">0 faixas</span></div><span class="hint">WAV · MP3 · FLAC · OGG</span></div>
-      <div class="timeline-head"><span>FAIXAS <small>ESTÉREO</small></span><div id="ruler" class="ruler"></div></div>
-      <div id="track-area">
-        <div id="empty" class="empty"><div class="empty-wave">▂ ▅ ▃ ▇ ▅ ▂ ▆ ▃ ▅</div><h2>O palco começa aqui</h2><p>Adicione as faixas da sua música.<br>Elas serão reproduzidas juntas, desde o primeiro instante.</p><button id="empty-import" class="secondary">Escolher arquivos de áudio <span>↗</span></button><small>Os arquivos ficam neste computador.</small></div>
-        <div id="tracks"></div>
+    </div>
+    <div class="tool-separator"></div>
+    <div class="tool-group history-tools" aria-hidden="true"><button class="icon-button" disabled>↶</button><button class="icon-button" disabled>↷</button><button class="icon-button cut-tool" disabled>CUT</button></div>
+    <div class="spacer"></div>
+    <label class="device-control" for="audio-device"><span>SAÍDA DE ÁUDIO</span><select id="audio-device"><option value="default">Dispositivo padrão</option></select></label>
+    <button id="refresh-devices" class="icon-button" title="Atualizar dispositivos">↻</button>
+    <button id="test-audio" class="test-button">Testar áudio</button>
+  </div>
+
+  <nav class="view-tabs" aria-label="Áreas de trabalho">
+    <button class="view-tab active" data-view="arrangement" aria-selected="true">ARRANJO</button>
+    <button class="view-tab" data-view="playlist" aria-selected="false">PLAYLIST <span id="song-count">1</span></button>
+  </nav>
+
+  <main>
+    <section id="arrangement-view" class="view-panel active">
+      <div class="project-strip">
+        <div><span class="section-label">PROJETO ATUAL</span><input id="song-name" class="song-name" value="Música 1" aria-label="Nome da música"></div>
+        <div class="project-stats"><span id="track-count">0 faixas</span><span id="song-duration">00:00.000</span><span>48 kHz</span></div>
       </div>
-      <div class="workspace-footer"><span id="session-state">Nenhum áudio carregado</span><span>Um relógio compartilhado para todas as faixas</span></div>
+
+      <section class="arrange-window" aria-label="Arranjo de multitracks">
+        <aside class="track-panel-title"><span>TCP</span><small>CONTROLES DE FAIXA</small></aside>
+        <div class="timeline-ruler"><div id="ruler" class="ruler"></div></div>
+        <div id="track-area" class="track-area">
+          <div id="empty" class="empty">
+            <div class="empty-wave">▂ ▅ ▃ ▇ ▅ ▂ ▆ ▃ ▅</div>
+            <h1>Arranjo vazio</h1>
+            <p>Importe os stems desta música para iniciar.<br>Todas as faixas usam o mesmo relógio de reprodução.</p>
+            <button id="empty-import" class="primary">Importar arquivos de áudio</button>
+          </div>
+          <div id="tracks"></div>
+        </div>
+      </section>
+
+      <section class="mixer" aria-label="Mixer">
+        <div class="mixer-title"><strong>MIXER</strong><span>Volume · Pan · Mute · Solo</span></div>
+        <div id="mixer-strips" class="mixer-strips"><div class="mixer-empty">As faixas aparecerão aqui</div></div>
+      </section>
     </section>
-    <div class="below"><p><span class="key">Espaço</span> Reproduzir / pausar <span class="key">Esc</span> Parar e voltar ao início</p><p>Mute silencia. Solo destaca as faixas selecionadas.</p></div>
-    <p id="notice" role="status" aria-live="polite">Importe arquivos de uma mesma música, alinhados na origem.</p>
+
+    <section id="playlist-view" class="view-panel">
+      <div class="playlist-header">
+        <div><span class="section-label">SETLIST DA SESSÃO</span><h1>Playlist</h1><p>Organize as músicas na ordem da apresentação. A troca é manual e nunca inicia a próxima música sozinha.</p></div>
+        <button id="playlist-new-song" class="primary">＋ Adicionar música</button>
+      </div>
+      <div class="playlist-table" role="table" aria-label="Playlist">
+        <div class="playlist-table-head" role="row"><span>#</span><span>MÚSICA</span><span>FAIXAS</span><span>DURAÇÃO</span><span>AÇÕES</span></div>
+        <div id="playlist-rows"></div>
+      </div>
+      <div class="playlist-help"><strong>Dica:</strong> selecione uma música e volte para Arranjo para importar ou ajustar suas faixas.</div>
+    </section>
+
+    <p id="notice" role="status" aria-live="polite">Selecione a saída de áudio e use “Testar áudio” antes de importar as faixas.</p>
   </main>
+
   <footer class="transport">
+    <div class="song-navigation"><button id="previous-song" title="Música anterior" aria-label="Música anterior"></button><button id="next-song" title="Próxima música" aria-label="Próxima música"></button></div>
     <div class="transport-controls"><button id="stop" aria-label="Parar e voltar ao início" title="Parar (Esc)" disabled>■</button><button id="play" class="play" aria-label="Reproduzir" title="Reproduzir / pausar (Espaço)" disabled></button></div>
     <div class="clock"><span id="position">00:00.000</span><small id="total">/ 00:00.000</small></div>
     <div class="seek-wrap"><label for="seek">POSIÇÃO <span id="play-state">PARADO</span></label><input id="seek" type="range" min="0" max="1" step="any" value="0" aria-label="Posição de reprodução" disabled></div>
-    <div class="master"><label for="master">SAÍDA MASTER <span id="master-value">80%</span></label><input id="master" type="range" min="0" max="1" step="0.01" value="0.8" aria-label="Volume master"></div>
+    <div class="master"><label for="master">MASTER <span id="master-value">80%</span></label><input id="master" type="range" min="0" max="1" step="0.01" value="0.8" aria-label="Volume master"></div>
   </footer>
+
   <script type="module" src="app.mjs"></script>
 </body>
 </html>

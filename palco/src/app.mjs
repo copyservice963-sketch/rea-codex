@@ -1,31 +1,154 @@
-import { AudioEngine, audible } from './audio-engine.mjs';
+import { AudioEngine, audible, panLabel } from './audio-engine.mjs';
 
 const $ = selector => document.querySelector(selector);
-const engine = new AudioEngine(new AudioContext({ latencyHint: 'playback' }));
+const $$ = selector => [...document.querySelectorAll(selector)];
+const context = new AudioContext({ latencyHint: 'interactive' });
+const engine = new AudioEngine(context);
 const colors = ['#f2f2f2', '#d6d6d6', '#bcbcbc', '#a2a2a2', '#888888', '#6e6e6e'];
 const elements = new Map();
+const songs = [createSong('Música 1')];
+let currentSongId = songs[0].id;
 let importing = false;
 let starting = false;
-const time = value => {
+
+function createSong(name) {
+  return { id: crypto.randomUUID(), name, tracks: [] };
+}
+
+function currentSong() { return songs.find(song => song.id === currentSongId); }
+function durationOf(song) { return Math.max(0, ...song.tracks.map(track => track.buffer.duration)); }
+function time(value) {
   const ms = Math.max(0, Math.round(value * 1000));
   return `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`;
-};
+}
 function notice(message) { $('#notice').textContent = message; }
+function showError(error) { notice(`Áudio: ${error.message}`); updateAudioState(true); }
+
+function updateAudioState(failed = false) {
+  const state = failed ? 'error' : engine.context.state;
+  const labels = { running: 'ÁUDIO ATIVO', suspended: 'ÁUDIO SUSPENSO', closed: 'ÁUDIO ENCERRADO', error: 'VERIFIQUE A SAÍDA' };
+  $('#audio-state').textContent = labels[state] || state.toUpperCase();
+  $('#audio-led').className = state === 'running' ? 'active' : state === 'error' || state === 'closed' ? 'error' : '';
+}
+
+async function loadAudioDevices() {
+  const select = $('#audio-device');
+  const selected = select.value || 'default';
+  select.replaceChildren(new Option('Dispositivo padrão do Windows', 'default'));
+  try {
+    if (!navigator.mediaDevices?.enumerateDevices) throw new Error('lista de dispositivos indisponível');
+    const outputs = (await navigator.mediaDevices.enumerateDevices()).filter(device => device.kind === 'audiooutput');
+    outputs.forEach((device, index) => {
+      if (device.deviceId === 'default') return;
+      select.add(new Option(device.label || `Saída de áudio ${index + 1}`, device.deviceId));
+    });
+    if ([...select.options].some(option => option.value === selected)) select.value = selected;
+    notice(outputs.length ? `${outputs.length} saída(s) encontrada(s). Use “Testar áudio” para confirmar.` : 'Usando a saída padrão do Windows.');
+  } catch (error) {
+    select.disabled = true;
+    notice(`Saída padrão selecionada; ${error.message}.`);
+  }
+}
+
+function switchView(view) {
+  $$('.view-tab').forEach(tab => {
+    const active = tab.dataset.view === view;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', String(active));
+  });
+  $$('.view-panel').forEach(panel => panel.classList.toggle('active', panel.id === `${view}-view`));
+  if (view === 'playlist') renderPlaylist();
+  if (view === 'arrangement') requestAnimationFrame(repaint);
+}
+
+function selectSong(id, openArrangement = false) {
+  const song = songs.find(candidate => candidate.id === id);
+  if (!song) return;
+  engine.setTracks(song.tracks);
+  currentSongId = id;
+  $('#song-name').value = song.name;
+  renderTracks();
+  refreshSession();
+  renderPlaylist();
+  if (openArrangement) switchView('arrangement');
+  notice(`Música selecionada: ${song.name}.`);
+}
+
+function addSong(openArrangement = true) {
+  const song = createSong(`Música ${songs.length + 1}`);
+  songs.push(song);
+  selectSong(song.id, openArrangement);
+  $('#song-name').select();
+}
+
+function moveSong(id, direction) {
+  const index = songs.findIndex(song => song.id === id);
+  const target = index + direction;
+  if (index < 0 || target < 0 || target >= songs.length) return;
+  [songs[index], songs[target]] = [songs[target], songs[index]];
+  renderPlaylist();
+}
+
+function removeSong(id) {
+  if (songs.length === 1) { notice('A playlist precisa manter pelo menos uma música.'); return; }
+  const index = songs.findIndex(song => song.id === id);
+  if (index < 0) return;
+  const wasCurrent = id === currentSongId;
+  const [removed] = songs.splice(index, 1);
+  if (wasCurrent) selectSong(songs[Math.min(index, songs.length - 1)].id);
+  else renderPlaylist();
+  notice(`Música removida da sessão: ${removed.name}. Os arquivos originais não foram alterados.`);
+}
+
+function renderPlaylist() {
+  $('#song-count').textContent = songs.length;
+  const rows = $('#playlist-rows');
+  rows.replaceChildren();
+  songs.forEach((song, index) => {
+    const row = document.createElement('article');
+    row.className = `playlist-row${song.id === currentSongId ? ' selected' : ''}`;
+    row.dataset.songId = song.id;
+    row.innerHTML = `<span class="playlist-index"></span><div class="playlist-name-wrap"><input class="playlist-name" aria-label="Nome da música"><small></small></div><span class="playlist-tracks"></span><span class="playlist-duration"></span><div class="playlist-actions"><button data-action="open" title="Abrir no arranjo">Abrir</button><button data-action="up" title="Mover para cima">↑</button><button data-action="down" title="Mover para baixo">↓</button><button data-action="remove" title="Remover música">×</button></div>`;
+    row.querySelector('.playlist-index').textContent = String(index + 1).padStart(2, '0');
+    const input = row.querySelector('.playlist-name'); input.value = song.name;
+    row.querySelector('.playlist-name-wrap small').textContent = song.id === currentSongId ? 'SELECIONADA' : 'PRONTA PARA SELECIONAR';
+    row.querySelector('.playlist-tracks').textContent = `${song.tracks.length} faixa${song.tracks.length === 1 ? '' : 's'}`;
+    row.querySelector('.playlist-duration').textContent = time(durationOf(song));
+    input.onchange = () => {
+      song.name = input.value.trim() || `Música ${index + 1}`;
+      input.value = song.name;
+      if (song.id === currentSongId) $('#song-name').value = song.name;
+    };
+    row.querySelector('[data-action=open]').onclick = () => selectSong(song.id, true);
+    row.querySelector('[data-action=up]').onclick = () => moveSong(song.id, -1);
+    row.querySelector('[data-action=down]').onclick = () => moveSong(song.id, 1);
+    row.querySelector('[data-action=remove]').onclick = () => removeSong(song.id);
+    rows.append(row);
+  });
+}
+
 function refreshMix() {
   engine.updateMix();
   for (const track of engine.tracks) {
-    const row = elements.get(track.id);
-    row.classList.toggle('muted', !audible(track, engine.tracks));
-    for (const kind of ['muted', 'solo']) {
-      const button = row.querySelector(`[data-kind=${kind}]`);
-      button.classList.toggle('active', track[kind]);
-      button.setAttribute('aria-pressed', String(track[kind]));
+    const views = elements.get(track.id);
+    if (!views) continue;
+    for (const container of [views.row, views.strip]) {
+      container.classList.toggle('muted', !audible(track, engine.tracks));
+      for (const kind of ['muted', 'solo']) {
+        const button = container.querySelector(`[data-kind=${kind}]`);
+        button.classList.toggle('active', track[kind]);
+        button.setAttribute('aria-pressed', String(track[kind]));
+      }
     }
   }
 }
+
 function paintWave(track) {
-  const row = elements.get(track.id), canvas = row.querySelector('canvas');
+  const views = elements.get(track.id);
+  if (!views) return;
+  const canvas = views.row.querySelector('canvas');
   const width = canvas.clientWidth, height = canvas.clientHeight;
+  if (!width || !height) return;
   const scale = window.devicePixelRatio || 1;
   canvas.width = width * scale; canvas.height = height * scale;
   const pen = canvas.getContext('2d'); pen.scale(scale, scale);
@@ -33,7 +156,6 @@ function paintWave(track) {
   const visibleWidth = width * track.buffer.duration / engine.duration;
   pen.strokeStyle = colors[engine.tracks.indexOf(track) % colors.length];
   pen.globalAlpha = 0.8; pen.lineWidth = 1.5;
-  // Fixed peak bins computed once; redraws never scan full audio buffers.
   if (!track.peaks) {
     const bins = Math.min(2000, channel.length), stride = Math.ceil(channel.length / bins);
     track.peaks = [];
@@ -45,55 +167,98 @@ function paintWave(track) {
   }
   for (let x = 0; x < visibleWidth; x += 3) {
     const peak = track.peaks[Math.min(track.peaks.length - 1, Math.floor(x / visibleWidth * track.peaks.length))];
-    const amplitude = Math.max(1, peak * 39);
+    const amplitude = Math.max(1, peak * 34);
     pen.beginPath(); pen.moveTo(x, height / 2 - amplitude); pen.lineTo(x, height / 2 + amplitude); pen.stroke();
   }
 }
-function repaint() { for (const track of engine.tracks) paintWave(track); }
+
+function repaint() { engine.tracks.forEach(paintWave); }
+
 function refreshSession() {
   const count = engine.tracks.length;
   $('#empty').hidden = !!count;
   $('#track-count').textContent = `${count} ${count === 1 ? 'faixa' : 'faixas'}`;
-  $('#session-state').textContent = count ? `${count} faixas · ${engine.context.sampleRate / 1000} kHz · saída estéreo` : 'Nenhum áudio carregado';
+  $('#song-duration').textContent = time(engine.duration);
   $('#seek').max = engine.duration || 1;
   $('#seek').disabled = !count || importing;
   $('#play').disabled = !count || importing || starting;
   $('#stop').disabled = !count || importing;
   $('#total').textContent = `/ ${time(engine.duration)}`;
-  $('#ruler').replaceChildren(...Array.from({ length: 6 }, (_, index) => {
-    const span = document.createElement('span'); span.textContent = time(engine.duration * index / 5).slice(0, 5); return span;
+  $('#previous-song').disabled = songs.findIndex(song => song.id === currentSongId) === 0;
+  $('#next-song').disabled = songs.findIndex(song => song.id === currentSongId) === songs.length - 1;
+  $('#ruler').replaceChildren(...Array.from({ length: 7 }, (_, index) => {
+    const span = document.createElement('span'); span.textContent = time(engine.duration * index / 6).slice(0, 5); return span;
   }));
+  renderPlaylist();
   repaint();
 }
-function addRow(track) {
-  const row = document.createElement('article'); row.className = 'track'; row.dataset.id = track.id;
-  row.style.setProperty('--track-color', colors[(engine.tracks.length - 1) % colors.length]);
-  row.innerHTML = `<div class="track-controls"><div class="track-top"><span class="track-number"></span><h2 class="track-name"></h2><button class="remove" title="Remover faixa">×</button></div><p class="track-info"></p><div class="track-bottom"><button class="mix-button mute" data-kind="muted" aria-pressed="false">M</button><button class="mix-button" data-kind="solo" aria-pressed="false">S</button><input class="track-volume" type="range" min="0" max="1" step="0.01" value="1"><span class="volume-value">100%</span></div></div><div class="wave-wrap"><canvas class="waveform"></canvas><div class="playhead"></div></div>`;
-  // Filenames are data; never insert them as HTML.
+
+function syncTrackControl(track, kind, value) {
+  const views = elements.get(track.id);
+  if (!views) return;
+  for (const container of [views.row, views.strip]) {
+    const input = container.querySelector(`[data-control=${kind}]`);
+    if (input && Number(input.value) !== value) input.value = value;
+    const label = container.querySelector(`[data-value=${kind}]`);
+    if (label) label.textContent = kind === 'pan' ? panLabel(value) : `${Math.round(value * 100)}%`;
+  }
+}
+
+function wireTrackControls(track, container) {
+  for (const kind of ['muted', 'solo']) {
+    const button = container.querySelector(`[data-kind=${kind}]`);
+    button.setAttribute('aria-label', `${kind === 'muted' ? 'Mute' : 'Solo'} ${track.name}`);
+    button.onclick = () => { track[kind] = !track[kind]; refreshMix(); };
+  }
+  const volume = container.querySelector('[data-control=volume]');
+  volume.setAttribute('aria-label', `Volume ${track.name}`);
+  volume.oninput = () => { track.volume = Number(volume.value); syncTrackControl(track, 'volume', track.volume); engine.updateMix(); };
+  const pan = container.querySelector('[data-control=pan]');
+  pan.setAttribute('aria-label', `Pan ${track.name}`);
+  pan.oninput = () => { track.pan = Number(pan.value); syncTrackControl(track, 'pan', track.pan); engine.updateMix(); };
+}
+
+function addRow(track, index) {
+  const row = document.createElement('article');
+  row.className = 'track'; row.dataset.id = track.id; row.style.setProperty('--track-color', colors[index % colors.length]);
+  row.innerHTML = `<div class="track-controls"><div class="track-top"><span class="track-number"></span><h2 class="track-name"></h2><button class="remove" title="Remover faixa">×</button></div><p class="track-info"></p><div class="track-mix-row"><button class="mix-button mute" data-kind="muted" aria-pressed="false">M</button><button class="mix-button" data-kind="solo" aria-pressed="false">S</button><label>VOL<input data-control="volume" type="range" min="0" max="1" step="0.01"><span data-value="volume"></span></label><label>PAN<input data-control="pan" type="range" min="-1" max="1" step="0.01"><span data-value="pan"></span></label></div></div><div class="wave-wrap"><canvas class="waveform"></canvas><div class="playhead"></div></div>`;
+  row.querySelector('.track-number').textContent = String(index + 1).padStart(2, '0');
   row.querySelector('.track-name').textContent = track.name;
   row.querySelector('.track-name').title = track.name;
   row.querySelector('.track-info').textContent = `${track.buffer.numberOfChannels === 1 ? 'MONO' : 'ESTÉREO'} · ${time(track.buffer.duration)} · ${track.buffer.sampleRate / 1000} kHz`;
   row.querySelector('.remove').setAttribute('aria-label', `Remover ${track.name}`);
+
+  const strip = document.createElement('article');
+  strip.className = 'mixer-strip'; strip.dataset.id = track.id;
+  strip.innerHTML = `<div class="strip-number"></div><strong class="strip-name"></strong><div class="meter"><i></i><i></i></div><div class="strip-buttons"><button class="mix-button mute" data-kind="muted" aria-pressed="false">M</button><button class="mix-button" data-kind="solo" aria-pressed="false">S</button></div><label>PAN <span data-value="pan"></span><input data-control="pan" type="range" min="-1" max="1" step="0.01"></label><label>VOL <span data-value="volume"></span><input data-control="volume" type="range" min="0" max="1" step="0.01"></label>`;
+  strip.querySelector('.strip-number').textContent = index + 1;
+  strip.querySelector('.strip-name').textContent = track.name;
+
+  elements.set(track.id, { row, strip });
+  wireTrackControls(track, row); wireTrackControls(track, strip);
+  syncTrackControl(track, 'volume', track.volume); syncTrackControl(track, 'pan', track.pan);
   row.querySelector('.remove').onclick = () => {
-    engine.remove(track.id); row.remove(); elements.delete(track.id);
-    for (const [index, item] of engine.tracks.entries()) elements.get(item.id).querySelector('.track-number').textContent = String(index + 1).padStart(2, '0');
-    refreshSession(); refreshMix(); notice('Faixa removida. A reprodução foi pausada.');
+    engine.remove(track.id); renderTracks(); refreshSession(); refreshMix();
+    notice('Faixa removida. A reprodução foi pausada.');
   };
-  row.querySelector('.track-number').textContent = String(engine.tracks.length).padStart(2, '0');
-  for (const kind of ['muted', 'solo']) {
-    const button = row.querySelector(`[data-kind=${kind}]`);
-    button.setAttribute('aria-label', `${kind === 'muted' ? 'Mute' : 'Solo'} ${track.name}`);
-    button.onclick = () => { track[kind] = !track[kind]; refreshMix(); };
-  }
-  const volume = row.querySelector('.track-volume'); volume.setAttribute('aria-label', `Volume ${track.name}`);
-  volume.oninput = () => { track.volume = Number(volume.value); row.querySelector('.volume-value').textContent = `${Math.round(track.volume * 100)}%`; engine.updateMix(); };
   row.querySelector('.wave-wrap').onclick = event => {
     const rect = event.currentTarget.getBoundingClientRect();
     engine.seek((event.clientX - rect.left) / rect.width * engine.duration).catch(showError);
   };
-  elements.set(track.id, row); $('#tracks').append(row);
+  $('#tracks').append(row); $('#mixer-strips').append(strip);
 }
-function showError(error) { notice(`Não foi possível reproduzir: ${error.message}`); }
+
+function renderTracks() {
+  elements.clear();
+  $('#tracks').replaceChildren(); $('#mixer-strips').replaceChildren();
+  if (!engine.tracks.length) {
+    const message = document.createElement('div'); message.className = 'mixer-empty'; message.textContent = 'As faixas aparecerão aqui';
+    $('#mixer-strips').append(message); return;
+  }
+  engine.tracks.forEach(addRow);
+  refreshMix();
+}
+
 async function importFiles(files) {
   if (importing || starting || !files.length) return;
   importing = true; engine.pause(); $('#import').disabled = true; $('#empty-import').disabled = true; refreshSession();
@@ -101,34 +266,61 @@ async function importFiles(files) {
   for (const file of files) {
     notice(`Carregando ${file.name}…`);
     try {
-      // Decoded audio is held in RAM. Bound the session before allocating large buffers.
       if (file.size > 256 * 1024 * 1024) throw new Error('limite de 256 MB por arquivo');
       const buffer = await engine.context.decodeAudioData(await file.arrayBuffer());
       const bytes = buffer.length * buffer.numberOfChannels * 4;
-      const retained = engine.tracks.reduce((sum, t) => sum + t.buffer.length * t.buffer.numberOfChannels * 4, 0);
+      const retained = songs.flatMap(song => song.tracks).reduce((sum, track) => sum + track.buffer.length * track.buffer.numberOfChannels * 4, 0);
       if (retained + bytes > 768 * 1024 * 1024) throw new Error('limite de memória da sessão (768 MB de áudio decodificado)');
-      const track = engine.add(buffer, file.name); addRow(track); added++;
+      engine.add(buffer, file.name); added++;
     } catch (error) { errors.push(`${file.name}: ${error.message}`); }
   }
   importing = false; $('#import').disabled = false; $('#empty-import').disabled = false; $('#files').value = '';
-  refreshSession(); refreshMix();
-  notice(errors.length ? `${added} faixa(s) importada(s). Falha: ${errors.join(' · ')}` : `${added} faixa(s) importada(s). Pronto para tocar. Os volumes somam; reduza o master para evitar saturação.`);
+  renderTracks(); refreshSession(); refreshMix();
+  notice(errors.length ? `${added} faixa(s) importada(s). Falha: ${errors.join(' · ')}` : `${added} faixa(s) importada(s) em ${currentSong().name}. Use “Testar áudio” se não ouvir a reprodução.`);
 }
-$('#files').onchange = event => importFiles([...event.target.files]);
-$('#import').onclick = $('#empty-import').onclick = () => $('#files').click();
+
 async function togglePlay() {
   if (importing || starting || !engine.tracks.length) return;
   if (engine.playing) { engine.pause(); return; }
   starting = true; refreshSession();
-  try { await engine.play(); } catch (error) { showError(error); }
+  try { await engine.play(); updateAudioState(); }
+  catch (error) { showError(error); }
   finally { starting = false; refreshSession(); }
 }
+
+function navigateSong(direction) {
+  const index = songs.findIndex(song => song.id === currentSongId);
+  const target = songs[index + direction];
+  if (target) selectSong(target.id);
+}
+
+$('#files').onchange = event => importFiles([...event.target.files]);
+$('#import').onclick = $('#empty-import').onclick = () => $('#files').click();
+$('#new-song').onclick = () => addSong(true);
+$('#playlist-new-song').onclick = () => addSong(false);
+$('#song-name').onchange = event => {
+  currentSong().name = event.target.value.trim() || 'Música sem nome';
+  event.target.value = currentSong().name; renderPlaylist();
+};
+$$('.view-tab').forEach(tab => tab.onclick = () => switchView(tab.dataset.view));
 $('#play').onclick = togglePlay;
 $('#stop').onclick = () => engine.stop();
+$('#previous-song').onclick = () => navigateSong(-1);
+$('#next-song').onclick = () => navigateSong(1);
 $('#seek').oninput = event => engine.seek(Number(event.target.value)).catch(showError);
 $('#master').oninput = event => {
   engine.setMaster(Number(event.target.value)); $('#master-value').textContent = `${Math.round(engine.masterVolume * 100)}%`;
 };
+$('#audio-device').onchange = async event => {
+  try { await engine.setOutputDevice(event.target.value); await engine.ensureReady(); updateAudioState(); notice(`Saída selecionada: ${event.target.selectedOptions[0].text}.`); }
+  catch (error) { showError(error); }
+};
+$('#refresh-devices').onclick = loadAudioDevices;
+$('#test-audio').onclick = async () => {
+  try { await engine.testTone(); updateAudioState(); notice(`Tom de teste enviado para “${$('#audio-device').selectedOptions[0].text}”. Se não ouviu, escolha outra saída.`); }
+  catch (error) { showError(error); }
+};
+
 document.addEventListener('keydown', event => {
   if (['INPUT', 'BUTTON', 'TEXTAREA', 'SELECT'].includes(event.target.tagName) || event.repeat) return;
   if (event.code === 'Space') { event.preventDefault(); togglePlay(); }
@@ -136,15 +328,21 @@ document.addEventListener('keydown', event => {
 });
 window.addEventListener('resize', repaint);
 window.addEventListener('beforeunload', event => {
-  if (engine.tracks.length) { event.preventDefault(); event.returnValue = ''; }
+  if (songs.some(song => song.tracks.length)) { event.preventDefault(); event.returnValue = ''; }
 });
+engine.context.addEventListener('statechange', () => updateAudioState());
+if (navigator.mediaDevices) navigator.mediaDevices.addEventListener('devicechange', loadAudioDevices);
+
 setInterval(() => {
-  if (engine.playing && engine.position >= engine.duration) { engine.stop(); notice('Fim da música. Reprodução parada no início.'); }
+  if (engine.playing && engine.position >= engine.duration) { engine.stop(); notice(`Fim de ${currentSong().name}. A próxima música não foi iniciada automaticamente.`); }
   $('#position').textContent = time(engine.position);
   $('#seek').value = engine.position;
   $('#play').classList.toggle('playing', engine.playing);
   $('#play').setAttribute('aria-label', engine.playing ? 'Pausar' : 'Reproduzir');
   $('#play-state').textContent = engine.playing ? 'REPRODUZINDO' : engine.offset ? 'PAUSADO' : 'PARADO';
-  for (const row of elements.values()) row.querySelector('.playhead').style.left = `${engine.duration ? engine.position / engine.duration * 100 : 0}%`;
+  for (const { row } of elements.values()) row.querySelector('.playhead').style.left = `${engine.duration ? engine.position / engine.duration * 100 : 0}%`;
 }, 40);
-refreshSession();
+
+engine.setTracks(currentSong().tracks);
+$('#song-name').value = currentSong().name;
+renderTracks(); refreshSession(); renderPlaylist(); updateAudioState(); loadAudioDevices();

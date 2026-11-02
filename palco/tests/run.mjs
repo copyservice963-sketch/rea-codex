@@ -38,16 +38,25 @@ try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(origin + '/index.html');
-  await check('Empty session and import controls', async () => {
-    await page.getByRole('heading', { name: 'Pronto para o palco.' }).waitFor();
+  await check('DAW workspace, playlist and audio diagnostics load', async () => {
+    await page.getByRole('heading', { name: 'Arranjo vazio' }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Reproduzir', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: /ARRANJO/ }).getAttribute('aria-selected'), 'true');
+    assert.equal(await page.locator('#audio-device option').count() >= 1, true);
+    await page.getByRole('button', { name: 'Testar áudio' }).click();
+    await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('Tom de teste'));
     await page.screenshot({ path: resolve(output, 'empty-session.png'), fullPage: true });
+    const splashPage = await browser.newPage({ viewport: { width: 620, height: 340 } });
+    await splashPage.goto(origin + '/splash.html');
+    await splashPage.getByText('PALCO', { exact: true }).waitFor();
+    await splashPage.screenshot({ path: resolve(output, 'splash.png') });
+    await splashPage.close();
   });
-  await check('Sample-accurate shared clock, volume, mute and solo with real rendered audio', async () => {
+  await check('Sample-accurate shared clock, volume, mute, solo and pan with rendered audio', async () => {
     const values = await page.evaluate(async () => {
       const { AudioEngine } = await import('/audio-engine.mjs');
       const outcomes = [];
-      for (const mode of ['all', 'mute', 'solo', 'mute-solo', 'volume']) {
+      for (const mode of ['all', 'mute', 'solo', 'mute-solo', 'volume', 'pan']) {
         const ctx = new OfflineAudioContext(2, 4800, 48000), engine = new AudioEngine(ctx);
         const a = ctx.createBuffer(1, 2400, 48000), b = ctx.createBuffer(1, 2400, 48000);
         a.getChannelData(0)[12] = 0.25; b.getChannelData(0)[12] = 0.5;
@@ -56,19 +65,25 @@ try {
         if (mode === 'solo' || mode === 'mute-solo') first.solo = true;
         if (mode === 'mute-solo') first.muted = true;
         if (mode === 'volume') { first.volume = 0.5; second.volume = 0.25; }
+        if (mode === 'pan') { first.pan = -1; second.pan = 1; }
         engine.schedule(0.01);
         const rendered = await ctx.startRendering();
-        const samples = rendered.getChannelData(0);
-        const nonzero = [...samples].map((value, index) => ({ value, index })).filter(s => Math.abs(s.value) > 0.00001);
-        outcomes.push({ mode, nonzero });
+        const left = rendered.getChannelData(0), right = rendered.getChannelData(1);
+        const index = [...left].findIndex((value, sample) => Math.abs(value) > 0.00001 || Math.abs(right[sample]) > 0.00001);
+        outcomes.push({ mode, index, left: index < 0 ? 0 : left[index], right: index < 0 ? 0 : right[index] });
       }
       return outcomes;
     });
-    for (const [index, expected] of [0.6, 0.4, 0.2, 0, 0.2].entries()) {
-      const actual = values[index].nonzero;
-      if (!expected) assert.equal(actual.length, 0);
-      else { assert.equal(actual.length, 1); assert.equal(actual[0].index, 492); assert.ok(Math.abs(actual[0].value - expected) < 0.00001); }
+    for (const result of values.slice(0, 5)) {
+      if (result.mode === 'mute-solo') { assert.equal(result.index, -1); continue; }
+      assert.equal(result.index, 492);
+      assert.ok(Math.abs(result.left - result.right) < 0.00001);
+      assert.ok(result.left > 0);
     }
+    const panned = values.at(-1);
+    assert.equal(panned.index, 492);
+    assert.ok(Math.abs(panned.left - 0.2) < 0.00001);
+    assert.ok(Math.abs(panned.right - 0.4) < 0.00001);
   });
   await check('Stop cancels a pending asynchronous audio start', async () => {
     const result = await page.evaluate(async () => {
@@ -76,7 +91,7 @@ try {
       const ctx = new AudioContext(), engine = new AudioEngine(ctx);
       engine.add(ctx.createBuffer(1, 4800, 48000), 'A');
       let release;
-      ctx.resume = () => new Promise(done => { release = done; });
+      engine.ensureReady = () => new Promise(done => { release = done; });
       const pending = engine.play(); engine.stop(); release(); await pending;
       const result = { playing: engine.playing, sources: engine.sources.length }; await ctx.close(); return result;
     });
@@ -87,7 +102,7 @@ try {
       { name: '01 - Base.wav', mimeType: 'audio/wav', buffer: wav(440) },
       { name: '02 - Guia <teste>.wav', mimeType: 'audio/wav', buffer: wav(880) }
     ]);
-    await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('Pronto para tocar'));
+    await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('2 faixa(s) importada(s)'));
     assert.equal(await page.locator('.track').count(), 2);
     assert.equal(await page.locator('.track-name').nth(1).textContent(), '02 - Guia <teste>.wav');
     assert.ok(await page.locator('canvas').first().evaluate(c => c.width > 0));
@@ -114,13 +129,17 @@ try {
     await first.locator('[data-kind=muted]').click();
     assert.match(await first.getAttribute('class'), /muted/);
     await first.locator('[data-kind=muted]').click(); await first.locator('[data-kind=solo]').click();
-    await first.locator('input').fill('0.35'); assert.equal(await first.locator('.volume-value').textContent(), '35%');
+    await first.locator('[data-control=volume]').fill('0.35');
+    assert.equal(await first.locator('[data-value=volume]').textContent(), '35%');
+    await first.locator('[data-control=pan]').fill('-1');
+    assert.equal(await first.locator('[data-value=pan]').textContent(), 'L100');
+    assert.equal(await page.locator('.mixer-strip').first().locator('[data-control=pan]').inputValue(), '-1');
     await page.locator('#master').fill('0.6'); assert.equal(await page.locator('#master-value').textContent(), '60%');
   });
   await check('Seek and natural end stop without automatically starting another song', async () => {
     await page.locator('#seek').fill('3.7');
     await page.getByRole('button', { name: 'Reproduzir', exact: true }).click();
-    await page.waitForFunction(() => document.querySelector('#notice').textContent.startsWith('Fim da música'));
+    await page.waitForFunction(() => document.querySelector('#notice').textContent.startsWith('Fim de'));
     assert.equal(await page.locator('#position').textContent(), '00:00.000');
     await page.getByRole('button', { name: 'Reproduzir', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('#play-state').textContent === 'REPRODUZINDO');
@@ -132,6 +151,22 @@ try {
   await check('Invalid audio reports failure while preserving loaded tracks', async () => {
     await page.locator('#files').setInputFiles({ name: 'invalido.wav', mimeType: 'audio/wav', buffer: Buffer.from('not audio') });
     await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('Falha:'));
+    assert.equal(await page.locator('.track').count(), 2);
+  });
+  await check('Playlist keeps separate songs and opens their arrangements', async () => {
+    await page.getByRole('button', { name: /PLAYLIST/ }).click();
+    assert.equal(await page.locator('.playlist-row').count(), 1);
+    assert.match(await page.locator('.playlist-row').first().locator('.playlist-tracks').textContent(), /2 faixas/);
+    await page.getByRole('button', { name: 'Adicionar música' }).click();
+    assert.equal(await page.locator('.playlist-row').count(), 2);
+    await page.locator('.playlist-row.selected').getByRole('button', { name: 'Abrir' }).click();
+    assert.equal(await page.locator('.track').count(), 0);
+    await page.locator('#files').setInputFiles({ name: 'Nova Música.wav', mimeType: 'audio/wav', buffer: wav(220) });
+    await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('1 faixa(s) importada(s)'));
+    await page.getByRole('button', { name: /PLAYLIST/ }).click();
+    assert.match(await page.locator('.playlist-row').nth(1).locator('.playlist-tracks').textContent(), /1 faixa/);
+    await page.screenshot({ path: resolve(output, 'playlist.png'), fullPage: true });
+    await page.locator('.playlist-row').first().getByRole('button', { name: 'Abrir' }).click();
     assert.equal(await page.locator('.track').count(), 2);
   });
   await check('Remove all tracks restores the empty session', async () => {
