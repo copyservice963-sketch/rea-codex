@@ -4,7 +4,11 @@ const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const context = new AudioContext({ latencyHint: 'interactive' });
 const engine = new AudioEngine(context);
-const colors = ['#f2f2f2', '#d6d6d6', '#bcbcbc', '#a2a2a2', '#888888', '#6e6e6e'];
+const themeColors = {
+  graphite: ['#f2f2f2', '#d6d6d6', '#bcbcbc', '#a2a2a2', '#888888', '#6e6e6e'],
+  midnight: ['#8fd3ff', '#63b9ee', '#4b9fd1', '#79a9c7', '#a6cbe2', '#5c7f96'],
+  amber: ['#f5c275', '#dda04b', '#be7d30', '#e0b179', '#a96e38', '#8a5c37']
+};
 const elements = new Map();
 let songs = [createSong('Música 1')];
 let currentSongId = songs[0].id;
@@ -15,10 +19,20 @@ const redoStack = [];
 const HISTORY_LIMIT = 80;
 const MAX_FILE_BYTES = 256 * 1024 * 1024;
 const MAX_SESSION_BYTES = 768 * 1024 * 1024;
+const MAX_SONGS = 128;
+const MAX_TRACKS = 256;
+const MAX_MARKERS = 2000;
+const THEMES = new Set(['graphite', 'midnight', 'amber']);
+let theme = THEMES.has(localStorage.getItem('palco-theme')) ? localStorage.getItem('palco-theme') : 'graphite';
 let dirty = false;
+let savedFingerprint = null;
+let looping = false;
 
 function createSong(name) {
-  return { id: crypto.randomUUID(), name, tracks: [], bpm: 120, metronome: false, markers: [] };
+  return {
+    id: crypto.randomUUID(), name, tracks: [], bpm: 120, metronome: false,
+    markers: [], loop: { enabled: false, start: 0, end: null }
+  };
 }
 
 function currentSong() { return songs.find(song => song.id === currentSongId); }
@@ -34,8 +48,10 @@ function captureState() {
   return {
     currentSongId,
     masterVolume: engine.masterVolume,
+    theme,
     songs: songs.map(song => ({
       ...song,
+      loop: { ...song.loop },
       markers: song.markers.map(marker => ({ ...marker })),
       tracks: song.tracks.map(track => ({
         ref: track,
@@ -52,11 +68,13 @@ function restoreState(state) {
   engine.stop();
   songs = state.songs.map(song => ({
     ...song,
+    loop: { ...song.loop },
     markers: song.markers.map(marker => ({ ...marker })),
     tracks: song.tracks.map(({ ref, values }) => Object.assign(ref, values))
   }));
   currentSongId = songs.some(song => song.id === state.currentSongId) ? state.currentSongId : songs[0].id;
   engine.setMaster(state.masterVolume ?? 0.8);
+  applyTheme(state.theme || 'graphite', false);
   $('#master').value = engine.masterVolume;
   $('#master-value').textContent = `${Math.round(engine.masterVolume * 100)}%`;
   selectSong(currentSongId);
@@ -93,11 +111,42 @@ function setDirty(value) {
   document.title = `${dirty ? '● ' : ''}Palco Multitracks`;
 }
 
+function applyTheme(value, record = true) {
+  const next = THEMES.has(value) ? value : 'graphite';
+  if (next === theme && document.body.dataset.theme === next) return;
+  if (record && next !== theme) checkpoint();
+  theme = next;
+  document.body.dataset.theme = theme;
+  $('#theme-select').value = theme;
+  localStorage.setItem('palco-theme', theme);
+  for (const [index, track] of engine.tracks.entries()) {
+    elements.get(track.id)?.row.style.setProperty('--track-color', themeColors[theme][index % themeColors[theme].length]);
+  }
+  requestAnimationFrame(repaint);
+}
+
+function fingerprint() {
+  return JSON.stringify({
+    theme, masterVolume: engine.masterVolume, currentSongId,
+    songs: songs.map(song => ({
+      id: song.id, name: song.name, bpm: song.bpm, metronome: song.metronome,
+      markers: song.markers, loop: song.loop,
+      tracks: song.tracks.map(track => ({
+        id: track.id, name: track.name, volume: track.volume, pan: track.pan,
+        muted: track.muted, solo: track.solo, start: track.start
+      }))
+    }))
+  });
+}
+
+function markSaved(value = fingerprint()) { savedFingerprint = value; refreshDirty(); }
+function refreshDirty() { setDirty(fingerprint() !== savedFingerprint); }
+
 function undo() {
   if (!undoStack.length) return;
   redoStack.push(captureState());
   restoreState(undoStack.pop());
-  setDirty(true);
+  refreshDirty();
   notice('Alteração desfeita.');
 }
 
@@ -105,7 +154,7 @@ function redo() {
   if (!redoStack.length) return;
   undoStack.push(captureState());
   restoreState(redoStack.pop());
-  setDirty(true);
+  refreshDirty();
   notice('Alteração refeita.');
 }
 
@@ -161,6 +210,7 @@ function selectSong(id, openArrangement = false) {
   $('#metronome').classList.toggle('active', song.metronome);
   $('#metronome').setAttribute('aria-pressed', String(song.metronome));
   engine.setTempo(song.bpm, song.metronome);
+  updateLoopControls();
   renderTracks();
   refreshSession();
   renderPlaylist();
@@ -253,7 +303,8 @@ function paintWave(track) {
   const pen = canvas.getContext('2d'); pen.scale(scale, scale);
   const channel = track.buffer.getChannelData(0);
   const visibleWidth = width;
-  pen.strokeStyle = colors[engine.tracks.indexOf(track) % colors.length];
+  const palette = themeColors[theme];
+  pen.strokeStyle = palette[engine.tracks.indexOf(track) % palette.length];
   pen.globalAlpha = 0.8; pen.lineWidth = 1.5;
   if (!track.peaks) {
     const bins = Math.min(2000, channel.length), stride = Math.ceil(channel.length / bins);
@@ -278,11 +329,18 @@ function renderMarkers() {
   layer.replaceChildren();
   const song = currentSong();
   for (const marker of song.markers) {
-    const element = document.createElement('i');
+    const element = document.createElement('button');
     element.className = 'marker';
     element.dataset.name = marker.name;
     element.title = `${marker.name} · ${time(marker.time)}`;
+    element.setAttribute('aria-label', `Ir para ${marker.name} em ${time(marker.time)}`);
     element.style.left = `${engine.duration ? marker.time / engine.duration * 100 : 0}%`;
+    element.onclick = () => engine.seek(marker.time).catch(showError);
+    element.oncontextmenu = event => {
+      event.preventDefault(); checkpoint();
+      song.markers = song.markers.filter(candidate => candidate.id !== marker.id);
+      renderMarkers(); notice(`Marcador ${marker.name} removido.`);
+    };
     layer.append(element);
   }
 }
@@ -294,6 +352,44 @@ function addMarker() {
   song.markers.sort((a, b) => a.time - b.time);
   renderMarkers();
   notice(`Marcador adicionado em ${time(engine.position)}.`);
+}
+
+function loopEnd(song = currentSong()) {
+  const end = Number(song.loop?.end);
+  return Number.isFinite(end) && end > song.loop.start ? Math.min(end, engine.duration) : engine.duration;
+}
+
+function updateLoopControls() {
+  const song = currentSong();
+  song.loop ||= { enabled: false, start: 0, end: null };
+  const end = loopEnd(song);
+  $('#loop-toggle').classList.toggle('active', song.loop.enabled);
+  $('#loop-toggle').setAttribute('aria-pressed', String(song.loop.enabled));
+  $('#loop-start').title = `Início do loop: ${time(song.loop.start)} ([)`;
+  $('#loop-end').title = `Fim do loop: ${time(end)} (])`;
+  const region = $('#loop-region');
+  region.hidden = !song.loop.enabled || !engine.duration || end <= song.loop.start;
+  region.style.left = `${engine.duration ? song.loop.start / engine.duration * 100 : 0}%`;
+  region.style.width = `${engine.duration ? (end - song.loop.start) / engine.duration * 100 : 0}%`;
+}
+
+function setLoopPoint(kind) {
+  const song = currentSong();
+  checkpoint();
+  if (kind === 'start') {
+    song.loop.start = Math.min(engine.position, Math.max(0, loopEnd(song) - 0.01));
+  } else {
+    song.loop.end = Math.max(engine.position, song.loop.start + 0.01);
+  }
+  updateLoopControls();
+  notice(`${kind === 'start' ? 'Início' : 'Fim'} do loop: ${time(kind === 'start' ? song.loop.start : loopEnd(song))}.`);
+}
+
+function toggleLoop() {
+  checkpoint();
+  const song = currentSong(); song.loop.enabled = !song.loop.enabled;
+  updateLoopControls();
+  notice(`Loop ${song.loop.enabled ? 'ativado' : 'desativado'}: ${time(song.loop.start)} até ${time(loopEnd(song))}.`);
 }
 
 function refreshSession() {
@@ -312,6 +408,7 @@ function refreshSession() {
     const span = document.createElement('span'); span.textContent = time(engine.duration * index / 6).slice(0, 5); return span;
   }));
   renderMarkers();
+  updateLoopControls();
   renderPlaylist();
   repaint();
 }
@@ -345,10 +442,21 @@ function wireTrackControls(track, container) {
   pan.onchange = () => finishFieldEdit(pan);
 }
 
+function moveTrack(track, direction) {
+  const index = engine.tracks.indexOf(track);
+  const target = index + direction;
+  if (index < 0 || target < 0 || target >= engine.tracks.length) return;
+  checkpoint(); engine.stop();
+  [engine.tracks[index], engine.tracks[target]] = [engine.tracks[target], engine.tracks[index]];
+  renderTracks(); refreshSession();
+  notice(`${track.name} movida para a posição ${target + 1}.`);
+}
+
 function addRow(track, index) {
   const row = document.createElement('article');
-  row.className = 'track'; row.dataset.id = track.id; row.style.setProperty('--track-color', colors[index % colors.length]);
-  row.innerHTML = `<div class="track-controls"><div class="track-top"><span class="track-number"></span><h2 class="track-name"></h2><button class="remove" title="Remover faixa">×</button></div><p class="track-info"></p><div class="track-mix-row"><button class="mix-button mute" data-kind="muted" aria-pressed="false">M</button><button class="mix-button" data-kind="solo" aria-pressed="false">S</button><label>VOL<input data-control="volume" type="range" min="0" max="1" step="0.01"><span data-value="volume"></span></label><label>PAN<input data-control="pan" type="range" min="-1" max="1" step="0.01"><span data-value="pan"></span></label><label class="start-control">INÍCIO<input data-control="start" type="number" min="0" step="0.01"></label></div></div><div class="wave-wrap"><div class="audio-item"><canvas class="waveform"></canvas></div><div class="playhead"></div></div>`;
+  const palette = themeColors[theme];
+  row.className = 'track'; row.dataset.id = track.id; row.style.setProperty('--track-color', palette[index % palette.length]);
+  row.innerHTML = `<div class="track-controls"><div class="track-top"><span class="track-number"></span><h2 class="track-name"></h2><div class="track-order"><button data-move="up" title="Mover faixa para cima">↑</button><button data-move="down" title="Mover faixa para baixo">↓</button></div><button class="remove" title="Remover faixa">×</button></div><p class="track-info"></p><div class="track-mix-row"><button class="mix-button mute" data-kind="muted" aria-pressed="false">M</button><button class="mix-button" data-kind="solo" aria-pressed="false">S</button><label>VOL<input data-control="volume" type="range" min="0" max="1" step="0.01"><span data-value="volume"></span></label><label>PAN<input data-control="pan" type="range" min="-1" max="1" step="0.01"><span data-value="pan"></span></label><label class="start-control">INÍCIO<input data-control="start" type="number" min="0" step="0.01"></label></div></div><div class="wave-wrap"><div class="audio-item"><canvas class="waveform"></canvas></div><div class="playhead"></div></div>`;
   row.querySelector('.track-number').textContent = String(index + 1).padStart(2, '0');
   row.querySelector('.track-name').textContent = track.name;
   row.querySelector('.track-name').title = track.name;
@@ -369,6 +477,10 @@ function addRow(track, index) {
   };
   row.querySelector('.track-info').textContent = `${track.buffer.numberOfChannels === 1 ? 'MONO' : 'ESTÉREO'} · ${time(track.buffer.duration)} · ${track.buffer.sampleRate / 1000} kHz`;
   row.querySelector('.remove').setAttribute('aria-label', `Remover ${track.name}`);
+  row.querySelector('[data-move=up]').disabled = index === 0;
+  row.querySelector('[data-move=down]').disabled = index === engine.tracks.length - 1;
+  row.querySelector('[data-move=up]').onclick = () => moveTrack(track, -1);
+  row.querySelector('[data-move=down]').onclick = () => moveTrack(track, 1);
 
   const strip = document.createElement('article');
   strip.className = 'mixer-strip'; strip.dataset.id = track.id;
@@ -498,8 +610,21 @@ function base64ToBytes(value) {
 }
 
 async function serializeProject() {
+  const stateFingerprint = fingerprint();
+  const projectSnapshot = {
+    currentSongId, masterVolume: engine.masterVolume, theme,
+    songs: songs.map(song => ({
+      id: song.id, name: song.name, bpm: song.bpm, metronome: song.metronome,
+      markers: song.markers.map(marker => ({ ...marker })), loop: { ...song.loop },
+      tracks: song.tracks.map(track => ({
+        id: track.id, name: track.name, volume: track.volume, pan: track.pan,
+        muted: track.muted, solo: track.solo, start: track.start || 0,
+        mimeType: track.mimeType, sourceBytes: track.sourceBytes
+      }))
+    }))
+  };
   const outputSongs = [];
-  for (const song of songs) {
+  for (const song of projectSnapshot.songs) {
     const tracks = [];
     for (const track of song.tracks) {
       if (!track.sourceBytes) throw new Error(`a faixa “${track.name}” não possui os bytes originais para salvar`);
@@ -511,30 +636,34 @@ async function serializeProject() {
     }
     outputSongs.push({
       id: song.id, name: song.name, bpm: song.bpm,
-      metronome: song.metronome, markers: song.markers, tracks
+      metronome: song.metronome, markers: song.markers, loop: song.loop, tracks
     });
   }
-  return JSON.stringify({
+  const content = JSON.stringify({
     format: 'palco-project', version: 1, savedAt: new Date().toISOString(),
-    currentSongId, masterVolume: engine.masterVolume, songs: outputSongs
+    currentSongId: projectSnapshot.currentSongId,
+    masterVolume: projectSnapshot.masterVolume,
+    theme: projectSnapshot.theme,
+    songs: outputSongs
   });
+  return { content, stateFingerprint };
 }
 
 async function saveProject() {
   try {
     notice('Preparando projeto…');
-    const content = await serializeProject();
+    const { content, stateFingerprint } = await serializeProject();
     if (window.palcoDesktop) {
       const result = await window.palcoDesktop.saveProject(content);
-      if (!result.canceled) setDirty(false);
-      notice(result.canceled ? 'Salvamento cancelado.' : `Projeto salvo em ${result.path}.`);
+      if (!result.canceled) markSaved(stateFingerprint);
+      notice(result.canceled ? 'Salvamento cancelado.' : `Projeto salvo em ${result.path}.${dirty ? ' Há alterações posteriores ainda não salvas.' : ''}`);
       return;
     }
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
     link.download = 'projeto-palco.palco.json'; link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-    setDirty(false);
+    markSaved(stateFingerprint);
     notice('Projeto exportado.');
   } catch (error) { notice(`Projeto: ${error.message}`); }
 }
@@ -544,16 +673,38 @@ async function loadProjectContent(content) {
   if (project?.format !== 'palco-project' || project.version !== 1 || !Array.isArray(project.songs) || !project.songs.length) {
     throw new Error('formato de projeto inválido ou incompatível');
   }
+  if (project.songs.length > MAX_SONGS) throw new Error(`o projeto excede ${MAX_SONGS} músicas`);
   const loadedSongs = [];
   let retainedBytes = 0;
+  let decodedBytes = 0;
+  let totalTracks = 0;
+  const songIds = new Set();
+  const trackIds = new Set();
   for (const sourceSong of project.songs) {
-    const song = createSong(String(sourceSong.name || 'Música'));
+    if (!Array.isArray(sourceSong.tracks)) throw new Error('uma música contém uma lista de faixas inválida');
+    totalTracks += sourceSong.tracks.length;
+    if (totalTracks > MAX_TRACKS) throw new Error(`o projeto excede ${MAX_TRACKS} faixas`);
+    const song = createSong(String(sourceSong.name || 'Música').slice(0, 200));
     song.id = String(sourceSong.id || crypto.randomUUID());
+    if (songIds.has(song.id)) throw new Error('o projeto contém IDs de música duplicados');
+    songIds.add(song.id);
     song.bpm = Math.max(30, Math.min(300, Number(sourceSong.bpm) || 120));
     song.metronome = Boolean(sourceSong.metronome);
-    song.markers = Array.isArray(sourceSong.markers) ? sourceSong.markers.map(marker => ({
-      id: String(marker.id || crypto.randomUUID()), name: String(marker.name || 'M'), time: Math.max(0, Number(marker.time) || 0)
-    })) : [];
+    if (Array.isArray(sourceSong.markers) && sourceSong.markers.length > MAX_MARKERS) throw new Error(`uma música excede ${MAX_MARKERS} marcadores`);
+    const markerIds = new Set();
+    song.markers = Array.isArray(sourceSong.markers) ? sourceSong.markers.map(marker => {
+      const id = String(marker.id || crypto.randomUUID());
+      if (markerIds.has(id)) throw new Error('uma música contém IDs de marcador duplicados');
+      markerIds.add(id);
+      return { id, name: String(marker.name || 'M').slice(0, 80), time: Math.max(0, Number(marker.time) || 0) };
+    }) : [];
+    const loopStart = Math.max(0, Number(sourceSong.loop?.start) || 0);
+    const loopEndValue = Number(sourceSong.loop?.end);
+    song.loop = {
+      enabled: Boolean(sourceSong.loop?.enabled),
+      start: loopStart,
+      end: Number.isFinite(loopEndValue) && loopEndValue > loopStart ? loopEndValue : null
+    };
     for (const sourceTrack of sourceSong.tracks || []) {
       if (typeof sourceTrack.audioBase64 !== 'string') throw new Error(`faixa “${sourceTrack.name}” não contém áudio válido`);
       const sourceBytes = base64ToBytes(sourceTrack.audioBase64);
@@ -561,8 +712,13 @@ async function loadProjectContent(content) {
       retainedBytes += sourceBytes.byteLength;
       if (retainedBytes > MAX_SESSION_BYTES) throw new Error('o projeto excede o limite de 768 MB de áudio');
       const buffer = await engine.context.decodeAudioData(sourceBytes.slice(0));
+      decodedBytes += buffer.length * buffer.numberOfChannels * 4;
+      if (decodedBytes > MAX_SESSION_BYTES) throw new Error('o projeto excede o limite de 768 MB de áudio decodificado');
+      const trackId = String(sourceTrack.id || crypto.randomUUID());
+      if (trackIds.has(trackId)) throw new Error('o projeto contém IDs de faixa duplicados');
+      trackIds.add(trackId);
       song.tracks.push({
-        id: String(sourceTrack.id || crypto.randomUUID()), name: String(sourceTrack.name || 'Faixa'), buffer,
+        id: trackId, name: String(sourceTrack.name || 'Faixa').slice(0, 200), buffer,
         volume: Number.isFinite(Number(sourceTrack.volume)) ? Math.max(0, Math.min(1, Number(sourceTrack.volume))) : 1,
         pan: Math.max(-1, Math.min(1, Number(sourceTrack.pan) || 0)),
         muted: Boolean(sourceTrack.muted), solo: Boolean(sourceTrack.solo),
@@ -578,9 +734,10 @@ async function loadProjectContent(content) {
   engine.setMaster(Number.isFinite(masterVolume) ? Math.max(0, Math.min(1, masterVolume)) : 0.8);
   $('#master').value = engine.masterVolume;
   $('#master-value').textContent = `${Math.round(engine.masterVolume * 100)}%`;
+  applyTheme(project.theme || theme, false);
   undoStack.length = 0; redoStack.length = 0;
   selectSong(currentSongId, true); updateHistoryButtons();
-  setDirty(false);
+  markSaved();
   notice(`Projeto aberto com ${songs.length} música(s).`);
 }
 
@@ -609,7 +766,7 @@ async function newProject() {
   songs = [createSong('Música 1')]; currentSongId = songs[0].id;
   undoStack.length = 0; redoStack.length = 0;
   selectSong(currentSongId, true); updateHistoryButtons();
-  setDirty(false);
+  markSaved();
   notice('Novo projeto criado.');
 }
 
@@ -627,6 +784,10 @@ $('#save-project').onclick = saveProject;
 $('#undo').onclick = undo;
 $('#redo').onclick = redo;
 $('#add-marker').onclick = addMarker;
+$('#loop-start').onclick = () => setLoopPoint('start');
+$('#loop-end').onclick = () => setLoopPoint('end');
+$('#loop-toggle').onclick = toggleLoop;
+$('#theme-select').onchange = event => applyTheme(event.target.value);
 $('#import').onclick = $('#empty-import').onclick = () => $('#files').click();
 $('#new-song').onclick = () => addSong(true);
 $('#playlist-new-song').onclick = () => addSong(false);
@@ -679,7 +840,13 @@ const appMenus = {
   edit: [['Desfazer', 'Ctrl+Z', undo], ['Refazer', 'Ctrl+Y', redo]],
   view: [['Arranjo', '', () => switchView('arrangement')], ['Playlist', '', () => switchView('playlist')]],
   track: [['Importar faixas…', '', () => $('#files').click()], ['Adicionar marcador', 'M', addMarker]],
-  options: [['Testar saída de áudio', '', () => $('#test-audio').click()], ['Ativar/desativar metrônomo', '', () => $('#metronome').click()]],
+  options: [
+    ['Testar saída de áudio', '', () => $('#test-audio').click()],
+    ['Ativar/desativar metrônomo', '', () => $('#metronome').click()],
+    ['Tema Grafite', '', () => applyTheme('graphite')],
+    ['Tema Meia-noite', '', () => applyTheme('midnight')],
+    ['Tema Âmbar', '', () => applyTheme('amber')]
+  ],
   help: [['Mostrar atalhos', '', () => $('#shortcuts-dialog').showModal()]]
 };
 
@@ -721,6 +888,11 @@ document.addEventListener('keydown', event => {
   if (event.code === 'Space') { event.preventDefault(); togglePlay(); }
   if (event.code === 'Escape') engine.stop();
   if (event.code === 'KeyM') addMarker();
+  if (event.code === 'KeyL') toggleLoop();
+  if (event.code === 'BracketLeft') setLoopPoint('start');
+  if (event.code === 'BracketRight') setLoopPoint('end');
+  if (event.code === 'Home') engine.seek(0).catch(showError);
+  if (event.code === 'End') engine.seek(engine.duration).catch(showError);
 });
 window.addEventListener('resize', repaint);
 window.addEventListener('beforeunload', event => {
@@ -730,7 +902,14 @@ engine.context.addEventListener('statechange', () => updateAudioState());
 if (navigator.mediaDevices) navigator.mediaDevices.addEventListener('devicechange', loadAudioDevices);
 
 setInterval(() => {
-  if (engine.playing && engine.position >= engine.duration) { engine.stop(); notice(`Fim de ${currentSong().name}. A próxima música não foi iniciada automaticamente.`); }
+  const song = currentSong();
+  const end = loopEnd(song);
+  if (engine.playing && song.loop.enabled && end > song.loop.start && engine.position >= end && !looping) {
+    looping = true;
+    engine.seek(song.loop.start).catch(showError).finally(() => { looping = false; });
+  } else if (engine.playing && engine.position >= engine.duration && !looping) {
+    engine.stop(); notice(`Fim de ${song.name}. A próxima música não foi iniciada automaticamente.`);
+  }
   $('#position').textContent = time(engine.position);
   $('#seek').value = engine.position;
   $('#play').classList.toggle('playing', engine.playing);
@@ -741,6 +920,7 @@ setInterval(() => {
 
 engine.setTracks(currentSong().tracks);
 engine.setTempo(currentSong().bpm, currentSong().metronome);
+applyTheme(theme, false);
 $('#song-name').value = currentSong().name;
 $('#tempo').value = currentSong().bpm;
-renderTracks(); refreshSession(); renderPlaylist(); updateHistoryButtons(); setDirty(false); updateAudioState(); loadAudioDevices();
+renderTracks(); refreshSession(); renderPlaylist(); updateHistoryButtons(); markSaved(); updateAudioState(); loadAudioDevices();

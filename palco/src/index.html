@@ -29,8 +29,9 @@
       <button id="import" class="tool-button primary" title="Importar faixas">＋ Faixas</button>
     </div>
     <div class="tool-separator"></div>
-    <div class="tool-group history-tools"><button id="undo" class="icon-button" title="Desfazer (Ctrl+Z)" disabled>↶</button><button id="redo" class="icon-button" title="Refazer (Ctrl+Y)" disabled>↷</button><button id="add-marker" class="tool-button" title="Adicionar marcador na posição atual (M)">＋ Marcador</button></div>
+    <div class="tool-group history-tools"><button id="undo" class="icon-button" title="Desfazer (Ctrl+Z)" disabled>↶</button><button id="redo" class="icon-button" title="Refazer (Ctrl+Y)" disabled>↷</button><button id="add-marker" class="tool-button" title="Adicionar marcador na posição atual (M)">＋ Marcador</button><button id="loop-start" class="icon-button" title="Definir início do loop ([)">[</button><button id="loop-end" class="icon-button" title="Definir fim do loop (])">]</button><button id="loop-toggle" class="tool-button" aria-pressed="false" title="Ativar loop (L)">LOOP</button></div>
     <div class="spacer"></div>
+    <label class="theme-control" for="theme-select"><span>TEMA</span><select id="theme-select"><option value="graphite">Grafite</option><option value="midnight">Meia-noite</option><option value="amber">Âmbar</option></select></label>
     <label class="device-control" for="audio-device"><span>SAÍDA DE ÁUDIO</span><select id="audio-device"><option value="default">Dispositivo padrão</option></select></label>
     <button id="refresh-devices" class="icon-button" title="Atualizar dispositivos">↻</button>
     <button id="test-audio" class="test-button">Testar áudio</button>
@@ -50,7 +51,7 @@
 
       <section class="arrange-window" aria-label="Arranjo de multitracks">
         <aside class="track-panel-title"><span>TCP</span><small>CONTROLES DE FAIXA</small></aside>
-        <div class="timeline-ruler"><div id="ruler" class="ruler"></div><div id="markers" class="markers" aria-label="Marcadores"></div></div>
+        <div class="timeline-ruler"><div id="ruler" class="ruler"></div><div id="loop-region" class="loop-region" hidden></div><div id="markers" class="markers" aria-label="Marcadores"></div></div>
         <div id="track-area" class="track-area">
           <div id="empty" class="empty">
             <div class="empty-wave">▂ ▅ ▃ ▇ ▅ ▂ ▆ ▃ ▅</div>
@@ -94,7 +95,7 @@
   <dialog id="shortcuts-dialog" class="shortcuts-dialog">
     <form method="dialog"><button aria-label="Fechar atalhos">×</button></form>
     <h2>Atalhos do Palco</h2>
-    <dl><dt>Ctrl+N</dt><dd>Novo projeto</dd><dt>Ctrl+O</dt><dd>Abrir projeto</dd><dt>Ctrl+S</dt><dd>Salvar projeto</dd><dt>Ctrl+Z / Ctrl+Y</dt><dd>Desfazer / refazer</dd><dt>Espaço</dt><dd>Reproduzir ou pausar</dd><dt>Esc</dt><dd>Parar</dd><dt>M</dt><dd>Adicionar marcador</dd></dl>
+    <dl><dt>Ctrl+N</dt><dd>Novo projeto</dd><dt>Ctrl+O</dt><dd>Abrir projeto</dd><dt>Ctrl+S</dt><dd>Salvar projeto</dd><dt>Ctrl+Z / Ctrl+Y</dt><dd>Desfazer / refazer</dd><dt>Espaço</dt><dd>Reproduzir ou pausar</dd><dt>Esc</dt><dd>Parar</dd><dt>M</dt><dd>Adicionar marcador</dd><dt>L</dt><dd>Ativar ou desativar loop</dd><dt>[ / ]</dt><dd>Definir início / fim do loop</dd></dl>
   </dialog>
 
   <script type="module" src="app.mjs"></script>

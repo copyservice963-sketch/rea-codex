@@ -59,6 +59,20 @@ try {
     await splashPage.screenshot({ path: resolve(output, 'splash.png') });
     await splashPage.close();
   });
+  await check('Three original themes apply and undo returns to the saved theme', async () => {
+    assert.deepEqual(await page.locator('#theme-select option').allTextContents(), ['Grafite', 'Meia-noite', 'Âmbar']);
+    const graphite = await page.locator('body').evaluate(element => getComputedStyle(element).backgroundColor);
+    await page.locator('#theme-select').selectOption('midnight');
+    const midnight = await page.locator('body').evaluate(element => getComputedStyle(element).backgroundColor);
+    await page.locator('#theme-select').selectOption('amber');
+    const amber = await page.locator('body').evaluate(element => getComputedStyle(element).backgroundColor);
+    await page.locator('#theme-select').selectOption('graphite');
+    assert.equal(await page.locator('body').getAttribute('data-theme'), 'graphite');
+    assert.notEqual(midnight, graphite); assert.notEqual(amber, graphite); assert.notEqual(amber, midnight);
+    await page.locator('#undo').click(); await page.locator('#undo').click(); await page.locator('#undo').click();
+    assert.equal(await page.locator('body').getAttribute('data-theme'), 'graphite');
+    assert.equal(await page.locator('#project-state').textContent(), 'SALVO');
+  });
   await check('Sample-accurate shared clock, volume, mute, solo and pan with rendered audio', async () => {
     const values = await page.evaluate(async () => {
       const { AudioEngine } = await import('/audio-engine.mjs');
@@ -126,6 +140,11 @@ try {
     assert.match(await page.locator('#total').textContent(), /00:04.000/);
     assert.equal(await page.locator('#project-state').textContent(), 'NÃO SALVO');
     await page.screenshot({ path: resolve(output, 'loaded-session.png'), fullPage: true });
+    await page.locator('#theme-select').selectOption('midnight');
+    await page.screenshot({ path: resolve(output, 'theme-midnight.png'), fullPage: true });
+    await page.locator('#theme-select').selectOption('amber');
+    await page.screenshot({ path: resolve(output, 'theme-amber.png'), fullPage: true });
+    await page.locator('#theme-select').selectOption('graphite');
   });
   await check('Playback advances, pause holds position, resume continues, stop resets', async () => {
     await page.getByRole('button', { name: 'Reproduzir', exact: true }).click();
@@ -161,6 +180,35 @@ try {
     await page.locator('#undo').click();
     assert.equal(await page.locator('.track-name').first().textContent(), '01 - Base.wav');
   });
+  await check('Tracks can be reordered and restored with undo', async () => {
+    await page.locator('.track').first().locator('[data-move=down]').click();
+    assert.equal(await page.locator('.track-name').first().textContent(), '02 - Guia <teste>.wav');
+    await page.locator('#undo').click();
+    assert.equal(await page.locator('.track-name').first().textContent(), '01 - Base.wav');
+  });
+  await check('Markers navigate, context click removes, and loop repeats the selected range', async () => {
+    await page.locator('#seek').fill('1.2');
+    await page.locator('#add-marker').click();
+    await page.locator('#seek').fill('0');
+    await page.locator('.marker').click();
+    await page.waitForFunction(() => document.querySelector('#position').textContent.startsWith('00:01.2'));
+    await page.locator('.marker').click({ button: 'right' });
+    assert.equal(await page.locator('.marker').count(), 0);
+
+    await page.locator('#seek').fill('0.5'); await page.locator('#loop-start').click();
+    await page.locator('#seek').fill('1'); await page.locator('#loop-end').click();
+    await page.locator('#loop-toggle').click();
+    assert.equal(await page.locator('#loop-toggle').getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.locator('#loop-region').isVisible(), true);
+    await page.locator('#seek').fill('0.95');
+    await page.getByRole('button', { name: 'Reproduzir', exact: true }).click();
+    await page.waitForTimeout(350);
+    const loopedPosition = await page.locator('#seek').inputValue();
+    assert.ok(Number(loopedPosition) >= 0.5 && Number(loopedPosition) < 1, `posição fora do loop: ${loopedPosition}`);
+    await page.getByRole('button', { name: 'Pausar', exact: true }).click();
+    await page.locator('#loop-toggle').click();
+    await page.getByRole('button', { name: 'Parar e voltar ao início' }).click();
+  });
   await check('Timeline start, markers, tempo, metronome, undo and project export work', async () => {
     const start = page.locator('.track').first().locator('[data-control=start]');
     await start.fill('1'); await start.press('Enter');
@@ -187,6 +235,7 @@ try {
     const project = JSON.parse(await readFile(await download.path(), 'utf8'));
     assert.equal(project.format, 'palco-project');
     assert.equal(project.version, 1);
+    assert.equal(project.theme, 'graphite');
     assert.equal(project.songs[0].tracks.length, 2);
     assert.ok(project.songs[0].tracks[0].audioBase64.length > 1000);
     assert.equal(await page.locator('#project-state').textContent(), 'SALVO');
@@ -201,6 +250,14 @@ try {
     assert.equal(await page.locator('#song-name').inputValue(), 'Música 1');
     assert.equal(await page.locator('.track').count(), 2);
     assert.equal(await page.locator('#project-state').textContent(), 'SALVO');
+
+    const invalid = structuredClone(project);
+    invalid.songs[0].tracks[1].id = invalid.songs[0].tracks[0].id;
+    await page.locator('#project-file').setInputFiles({
+      name: 'invalido.palco.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(invalid))
+    });
+    await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('IDs de faixa duplicados'));
+    assert.equal(await page.locator('.track').count(), 2);
   });
   await check('Seek and natural end stop without automatically starting another song', async () => {
     await page.locator('#seek').fill('3.7');
