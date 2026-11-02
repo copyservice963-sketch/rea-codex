@@ -1,0 +1,40 @@
+{
+  "name": "palco-multitracks",
+  "version": "0.1.1",
+  "description": "Player de multitracks para apresentações ao vivo",
+  "author": "Palco Multitracks",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node tests/run.mjs",
+    "dist:win": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "45.2.1",
+    "electron-builder": "26.18.0",
+    "playwright-core": "1.64.1"
+  },
+  "build": {
+    "appId": "app.palco.multitracks",
+    "publish": [],
+    "productName": "Palco Multitracks",
+    "afterPack": "./build/after-pack.cjs",
+    "directories": { "output": "release" },
+    "files": ["desktop/**/*", "src/**/*", "package.json"],
+    "asar": true,
+    "win": { "target": "nsis", "signAndEditExecutable": false },
+    "nsis": {
+      "script": "build/installer.nsi",
+      "installerLanguages": ["pt_BR"],
+      "language": "1046",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "artifactName": "Palco-Multitracks-${version}-Windows-x64-Setup.${ext}",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

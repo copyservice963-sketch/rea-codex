@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'">
+  <title>Palco Multitracks</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="Palco Multitracks"><span class="brand-icon">▥</span> palco<span class="brand-caption">MULTITRACKS</span></a>
+    <span class="project-name">Sessão ao vivo <span>•</span> <small>Nova sessão</small></span>
+    <span class="local-badge"><i></i> Áudio local · Offline</span>
+  </header>
+  <main>
+    <section class="heading">
+      <div><p class="eyebrow">SEU SOM. NO MESMO TEMPO.</p><h1>Pronto para o palco.</h1><p class="subtitle">Suas faixas, uma só performance. Importe os áudios para começar.</p></div>
+      <button id="import" class="primary"><span>＋</span> Importar faixas</button>
+      <input id="files" type="file" accept=".wav,.mp3,.ogg,.flac,audio/*" multiple hidden>
+    </section>
+    <section class="workspace" aria-label="Sessão de multitracks">
+      <div class="session-bar"><div><span class="session-dot"></span> MIXAGEM <span id="track-count">0 faixas</span></div><span class="hint">WAV · MP3 · FLAC · OGG</span></div>
+      <div class="timeline-head"><span>FAIXAS <small>ESTÉREO</small></span><div id="ruler" class="ruler"></div></div>
+      <div id="track-area">
+        <div id="empty" class="empty"><div class="empty-wave">▂ ▅ ▃ ▇ ▅ ▂ ▆ ▃ ▅</div><h2>O palco começa aqui</h2><p>Adicione as faixas da sua música.<br>Elas serão reproduzidas juntas, desde o primeiro instante.</p><button id="empty-import" class="secondary">Escolher arquivos de áudio <span>↗</span></button><small>Os arquivos ficam neste computador.</small></div>
+        <div id="tracks"></div>
+      </div>
+      <div class="workspace-footer"><span id="session-state">Nenhum áudio carregado</span><span>Um relógio compartilhado para todas as faixas</span></div>
+    </section>
+    <div class="below"><p><span class="key">Espaço</span> Reproduzir / pausar <span class="key">Esc</span> Parar e voltar ao início</p><p>Mute silencia. Solo destaca as faixas selecionadas.</p></div>
+    <p id="notice" role="status" aria-live="polite">Importe arquivos de uma mesma música, alinhados na origem.</p>
+  </main>
+  <footer class="transport">
+    <div class="transport-controls"><button id="stop" aria-label="Parar e voltar ao início" title="Parar (Esc)" disabled>■</button><button id="play" class="play" aria-label="Reproduzir" title="Reproduzir / pausar (Espaço)" disabled></button></div>
+    <div class="clock"><span id="position">00:00.000</span><small id="total">/ 00:00.000</small></div>
+    <div class="seek-wrap"><label for="seek">POSIÇÃO <span id="play-state">PARADO</span></label><input id="seek" type="range" min="0" max="1" step="any" value="0" aria-label="Posição de reprodução" disabled></div>
+    <div class="master"><label for="master">SAÍDA MASTER <span id="master-value">80%</span></label><input id="master" type="range" min="0" max="1" step="0.01" value="0.8" aria-label="Volume master"></div>
+  </footer>
+  <script type="module" src="app.mjs"></script>
+</body>
+</html>
