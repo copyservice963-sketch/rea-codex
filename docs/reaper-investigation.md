@@ -37,3 +37,28 @@ Não foram verificados: validade da assinatura Authenticode, autenticidade frent
 O Palco usa Electron/Web Audio, `AudioBufferSourceNode` por faixa, relógio compartilhado e ganhos individuais e master. Essas são **decisões de implementação própria**, não resultados de descompilação do REAPER. Não há código, plugins ou recursos gráficos extraídos incluídos no produto.
 
 O teste de renderização usa impulsos sintéticos em duas faixas: ambas iniciam no mesmo instante e seus impulsos aparecem no mesmo índice de amostra. Também verifica os valores da soma, volumes, mute e solo. Testes adicionais cobrem transporte e importação. Essa evidência valida o motor próprio no Chromium Linux, sem medir comportamento físico no Windows.
+
+## Ampliação da investigação para a versão 0.3.0
+
+O instalador reenviado tem o mesmo tamanho e SHA-256 do alvo anterior. A CLI oficial REA 6.5.0 executou novas operações somente leitura:
+
+- `inspect-artifact`, evidência `ev_afde710606cdc55d8be4445a4f56d89652d6c4b566c2bbdfb824a9e7f0724509`, confirmou a identidade do invólucro PE e informou que o inventário genérico não reconhece seus membros NSIS;
+- `inspect-with-objdump file_headers`, evidência `ev_3a07ee26b433edd8a205ad80f5e8b56cb9b70ba4ba0f78d0401a7937c6dfeabd`, observou `pei-x86-64`, ponto de entrada `0x140bfc0d0` e preservou o mesmo digest antes e depois da leitura;
+- `inspect-with-objdump section_headers`, evidência `ev_c7f0cc243e2f525050033336b3ecea5d760ff565c3f719c1d8d646a7e9697838`, observou nove seções, incluindo código `.text`, dados, TLS, `.trace` e aproximadamente 2,5 MiB em `.rsrc`.
+
+O guia rápido e o histórico de versões que acompanham o instalador foram extraídos apenas para leitura em `/workspace/reaper-investigation/reference-docs/`, fora deste repositório. Eles não são redistribuídos nem incorporados ao Palco. Como documentação fornecida pelo produto, sustentam o seguinte inventário de áreas funcionais:
+
+| Área | Comportamentos documentados | Situação no Palco 0.3.0 |
+| --- | --- | --- |
+| Projeto e transporte | novo/salvar, cursor, seleção de tempo, loop, play, pause, stop | salvar/abrir projeto, posição, play, pause e stop; seleção/loop pendentes |
+| Faixas e mixer | volume, pan, mute, solo, pastas, sends, templates | volume, pan, mute, solo e master; pastas/sends/templates pendentes |
+| Itens de áudio | importar, mover, copiar, dividir, fades, crossfade, stretch, slip, glue | importar e definir início; demais edições pendentes |
+| Gravação | arm, entrada, monitoramento, modos e takes | pendente |
+| FX | cadeias, bypass, wet/dry, envelopes, VST e instrumentos | pendente |
+| Automação | envelopes, pontos, curvas e modos | pendente |
+| MIDI | dispositivos, editor, inline, controle e panic | pendente |
+| Tempo | BPM, compasso, mapa de tempo e marcadores | BPM, metrônomo e marcadores simples; compasso/mapa pendentes |
+| Ações | lista pesquisável, atalhos e menus personalizáveis | atalhos principais fixos e desfazer/refazer; personalização pendente |
+| Renderização | mix, stems, consolidação e conversão | pendente |
+
+Essa matriz é uma especificação de comportamento, não uma alegação de equivalência. Uma implementação completa exige várias versões, testes no Windows e decisões próprias de arquitetura. O Palco não usa código, ícones, temas, nomes de marca, plugins ou mecanismos de licença extraídos do alvo.

@@ -15,15 +15,18 @@ export class AudioEngine {
     this.master.connect(context.destination);
     this.tracks = [];
     this.sources = [];
+    this.clicks = [];
     this.playing = false;
     this.offset = 0;
     this.startedAt = 0;
     this.revision = 0;
     this.masterVolume = 0.8;
+    this.tempo = 120;
+    this.metronome = false;
     this.master.gain.value = this.masterVolume;
   }
 
-  get duration() { return Math.max(0, ...this.tracks.map(track => track.buffer.duration)); }
+  get duration() { return Math.max(0, ...this.tracks.map(track => (track.start || 0) + track.buffer.duration)); }
   get position() {
     return Math.min(this.duration, this.playing
       ? this.offset + Math.max(0, this.context.currentTime - this.startedAt)
@@ -35,10 +38,12 @@ export class AudioEngine {
     this.tracks = tracks;
   }
 
-  add(buffer, name) {
+  add(buffer, name, options = {}) {
     const track = {
       id: crypto.randomUUID(), name, buffer,
-      volume: 1, pan: 0, muted: false, solo: false
+      volume: 1, pan: 0, muted: false, solo: false, start: 0,
+      sourceBytes: options.sourceBytes || null,
+      mimeType: options.mimeType || 'application/octet-stream'
     };
     this.tracks.push(track);
     return track;
@@ -62,6 +67,11 @@ export class AudioEngine {
   setMaster(value) {
     this.masterVolume = value;
     this.master.gain.setTargetAtTime(value, this.context.currentTime, 0.008);
+  }
+
+  setTempo(bpm, metronome = this.metronome) {
+    this.tempo = Math.max(30, Math.min(300, Number(bpm) || 120));
+    this.metronome = Boolean(metronome);
   }
 
   async ensureReady() {
@@ -110,7 +120,9 @@ export class AudioEngine {
     this.startedAt = when;
     this.playing = true;
     for (const track of this.tracks) {
-      if (this.offset >= track.buffer.duration) continue;
+      const trackStart = track.start || 0;
+      const trackEnd = trackStart + track.buffer.duration;
+      if (this.offset >= trackEnd) continue;
       const source = this.context.createBufferSource();
       const gain = this.context.createGain();
       const panner = this.context.createStereoPanner();
@@ -118,8 +130,27 @@ export class AudioEngine {
       source.connect(gain); gain.connect(panner); panner.connect(this.master);
       gain.gain.value = audible(track, this.tracks) ? track.volume : 0;
       panner.pan.value = track.pan;
-      source.start(when, this.offset);
+      const delay = Math.max(0, trackStart - this.offset);
+      const sourceOffset = Math.max(0, this.offset - trackStart);
+      source.start(when + delay, sourceOffset);
       this.sources.push({ source, gain, panner, track });
+    }
+    if (this.metronome) this.scheduleMetronome(when);
+  }
+
+  scheduleMetronome(when) {
+    const beat = 60 / this.tempo;
+    const first = Math.ceil(this.offset / beat) * beat;
+    for (let position = first, count = 0; position <= this.duration && count < 10000; position += beat, count++) {
+      const oscillator = this.context.createOscillator();
+      const gain = this.context.createGain();
+      const start = when + position - this.offset;
+      oscillator.frequency.value = Math.round(position / beat) % 4 === 0 ? 1320 : 880;
+      gain.gain.setValueAtTime(0.12, start);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.045);
+      oscillator.connect(gain); gain.connect(this.master);
+      oscillator.start(start); oscillator.stop(start + 0.05);
+      this.clicks.push({ oscillator, gain });
     }
   }
 
@@ -132,6 +163,11 @@ export class AudioEngine {
       source.disconnect(); gain.disconnect(); panner.disconnect();
     }
     this.sources = [];
+    for (const { oscillator, gain } of this.clicks) {
+      try { oscillator.stop(); } catch {}
+      oscillator.disconnect(); gain.disconnect();
+    }
+    this.clicks = [];
   }
 
   stop() { this.pause(); this.offset = 0; }

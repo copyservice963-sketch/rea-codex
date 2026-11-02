@@ -6,23 +6,81 @@ const context = new AudioContext({ latencyHint: 'interactive' });
 const engine = new AudioEngine(context);
 const colors = ['#f2f2f2', '#d6d6d6', '#bcbcbc', '#a2a2a2', '#888888', '#6e6e6e'];
 const elements = new Map();
-const songs = [createSong('Música 1')];
+let songs = [createSong('Música 1')];
 let currentSongId = songs[0].id;
 let importing = false;
 let starting = false;
+const undoStack = [];
+const redoStack = [];
+const HISTORY_LIMIT = 80;
 
 function createSong(name) {
-  return { id: crypto.randomUUID(), name, tracks: [] };
+  return { id: crypto.randomUUID(), name, tracks: [], bpm: 120, metronome: false, markers: [] };
 }
 
 function currentSong() { return songs.find(song => song.id === currentSongId); }
-function durationOf(song) { return Math.max(0, ...song.tracks.map(track => track.buffer.duration)); }
+function durationOf(song) { return Math.max(0, ...song.tracks.map(track => (track.start || 0) + track.buffer.duration)); }
 function time(value) {
   const ms = Math.max(0, Math.round(value * 1000));
   return `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`;
 }
 function notice(message) { $('#notice').textContent = message; }
 function showError(error) { notice(`Áudio: ${error.message}`); updateAudioState(true); }
+
+function captureState() {
+  return {
+    currentSongId,
+    songs: songs.map(song => ({
+      ...song,
+      markers: song.markers.map(marker => ({ ...marker })),
+      tracks: song.tracks.map(track => ({
+        ref: track,
+        values: {
+          name: track.name, volume: track.volume, pan: track.pan,
+          muted: track.muted, solo: track.solo, start: track.start || 0
+        }
+      }))
+    }))
+  };
+}
+
+function restoreState(state) {
+  engine.stop();
+  songs = state.songs.map(song => ({
+    ...song,
+    markers: song.markers.map(marker => ({ ...marker })),
+    tracks: song.tracks.map(({ ref, values }) => Object.assign(ref, values))
+  }));
+  currentSongId = songs.some(song => song.id === state.currentSongId) ? state.currentSongId : songs[0].id;
+  selectSong(currentSongId);
+  updateHistoryButtons();
+}
+
+function checkpoint() {
+  undoStack.push(captureState());
+  if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+  redoStack.length = 0;
+  updateHistoryButtons();
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(captureState());
+  restoreState(undoStack.pop());
+  notice('Alteração desfeita.');
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(captureState());
+  restoreState(redoStack.pop());
+  notice('Alteração refeita.');
+}
+
+function updateHistoryButtons() {
+  $('#undo').disabled = !undoStack.length;
+  $('#redo').disabled = !redoStack.length;
+}
 
 function updateAudioState(failed = false) {
   const state = failed ? 'error' : engine.context.state;
@@ -67,6 +125,10 @@ function selectSong(id, openArrangement = false) {
   engine.setTracks(song.tracks);
   currentSongId = id;
   $('#song-name').value = song.name;
+  $('#tempo').value = song.bpm;
+  $('#metronome').classList.toggle('active', song.metronome);
+  $('#metronome').setAttribute('aria-pressed', String(song.metronome));
+  engine.setTempo(song.bpm, song.metronome);
   renderTracks();
   refreshSession();
   renderPlaylist();
@@ -75,6 +137,7 @@ function selectSong(id, openArrangement = false) {
 }
 
 function addSong(openArrangement = true) {
+  checkpoint();
   const song = createSong(`Música ${songs.length + 1}`);
   songs.push(song);
   selectSong(song.id, openArrangement);
@@ -85,6 +148,7 @@ function moveSong(id, direction) {
   const index = songs.findIndex(song => song.id === id);
   const target = index + direction;
   if (index < 0 || target < 0 || target >= songs.length) return;
+  checkpoint();
   [songs[index], songs[target]] = [songs[target], songs[index]];
   renderPlaylist();
 }
@@ -93,6 +157,7 @@ function removeSong(id) {
   if (songs.length === 1) { notice('A playlist precisa manter pelo menos uma música.'); return; }
   const index = songs.findIndex(song => song.id === id);
   if (index < 0) return;
+  checkpoint();
   const wasCurrent = id === currentSongId;
   const [removed] = songs.splice(index, 1);
   if (wasCurrent) selectSong(songs[Math.min(index, songs.length - 1)].id);
@@ -115,6 +180,7 @@ function renderPlaylist() {
     row.querySelector('.playlist-tracks').textContent = `${song.tracks.length} faixa${song.tracks.length === 1 ? '' : 's'}`;
     row.querySelector('.playlist-duration').textContent = time(durationOf(song));
     input.onchange = () => {
+      checkpoint();
       song.name = input.value.trim() || `Música ${index + 1}`;
       input.value = song.name;
       if (song.id === currentSongId) $('#song-name').value = song.name;
@@ -153,7 +219,7 @@ function paintWave(track) {
   canvas.width = width * scale; canvas.height = height * scale;
   const pen = canvas.getContext('2d'); pen.scale(scale, scale);
   const channel = track.buffer.getChannelData(0);
-  const visibleWidth = width * track.buffer.duration / engine.duration;
+  const visibleWidth = width;
   pen.strokeStyle = colors[engine.tracks.indexOf(track) % colors.length];
   pen.globalAlpha = 0.8; pen.lineWidth = 1.5;
   if (!track.peaks) {
@@ -174,6 +240,29 @@ function paintWave(track) {
 
 function repaint() { engine.tracks.forEach(paintWave); }
 
+function renderMarkers() {
+  const layer = $('#markers');
+  layer.replaceChildren();
+  const song = currentSong();
+  for (const marker of song.markers) {
+    const element = document.createElement('i');
+    element.className = 'marker';
+    element.dataset.name = marker.name;
+    element.title = `${marker.name} · ${time(marker.time)}`;
+    element.style.left = `${engine.duration ? marker.time / engine.duration * 100 : 0}%`;
+    layer.append(element);
+  }
+}
+
+function addMarker() {
+  const song = currentSong();
+  checkpoint();
+  song.markers.push({ id: crypto.randomUUID(), time: engine.position, name: `M${song.markers.length + 1}` });
+  song.markers.sort((a, b) => a.time - b.time);
+  renderMarkers();
+  notice(`Marcador adicionado em ${time(engine.position)}.`);
+}
+
 function refreshSession() {
   const count = engine.tracks.length;
   $('#empty').hidden = !!count;
@@ -189,6 +278,7 @@ function refreshSession() {
   $('#ruler').replaceChildren(...Array.from({ length: 7 }, (_, index) => {
     const span = document.createElement('span'); span.textContent = time(engine.duration * index / 6).slice(0, 5); return span;
   }));
+  renderMarkers();
   renderPlaylist();
   repaint();
 }
@@ -208,20 +298,22 @@ function wireTrackControls(track, container) {
   for (const kind of ['muted', 'solo']) {
     const button = container.querySelector(`[data-kind=${kind}]`);
     button.setAttribute('aria-label', `${kind === 'muted' ? 'Mute' : 'Solo'} ${track.name}`);
-    button.onclick = () => { track[kind] = !track[kind]; refreshMix(); };
+    button.onclick = () => { checkpoint(); track[kind] = !track[kind]; refreshMix(); };
   }
   const volume = container.querySelector('[data-control=volume]');
   volume.setAttribute('aria-label', `Volume ${track.name}`);
+  volume.onpointerdown = checkpoint;
   volume.oninput = () => { track.volume = Number(volume.value); syncTrackControl(track, 'volume', track.volume); engine.updateMix(); };
   const pan = container.querySelector('[data-control=pan]');
   pan.setAttribute('aria-label', `Pan ${track.name}`);
+  pan.onpointerdown = checkpoint;
   pan.oninput = () => { track.pan = Number(pan.value); syncTrackControl(track, 'pan', track.pan); engine.updateMix(); };
 }
 
 function addRow(track, index) {
   const row = document.createElement('article');
   row.className = 'track'; row.dataset.id = track.id; row.style.setProperty('--track-color', colors[index % colors.length]);
-  row.innerHTML = `<div class="track-controls"><div class="track-top"><span class="track-number"></span><h2 class="track-name"></h2><button class="remove" title="Remover faixa">×</button></div><p class="track-info"></p><div class="track-mix-row"><button class="mix-button mute" data-kind="muted" aria-pressed="false">M</button><button class="mix-button" data-kind="solo" aria-pressed="false">S</button><label>VOL<input data-control="volume" type="range" min="0" max="1" step="0.01"><span data-value="volume"></span></label><label>PAN<input data-control="pan" type="range" min="-1" max="1" step="0.01"><span data-value="pan"></span></label></div></div><div class="wave-wrap"><canvas class="waveform"></canvas><div class="playhead"></div></div>`;
+  row.innerHTML = `<div class="track-controls"><div class="track-top"><span class="track-number"></span><h2 class="track-name"></h2><button class="remove" title="Remover faixa">×</button></div><p class="track-info"></p><div class="track-mix-row"><button class="mix-button mute" data-kind="muted" aria-pressed="false">M</button><button class="mix-button" data-kind="solo" aria-pressed="false">S</button><label>VOL<input data-control="volume" type="range" min="0" max="1" step="0.01"><span data-value="volume"></span></label><label>PAN<input data-control="pan" type="range" min="-1" max="1" step="0.01"><span data-value="pan"></span></label><label class="start-control">INÍCIO<input data-control="start" type="number" min="0" step="0.01"></label></div></div><div class="wave-wrap"><div class="audio-item"><canvas class="waveform"></canvas></div><div class="playhead"></div></div>`;
   row.querySelector('.track-number').textContent = String(index + 1).padStart(2, '0');
   row.querySelector('.track-name').textContent = track.name;
   row.querySelector('.track-name').title = track.name;
@@ -237,7 +329,19 @@ function addRow(track, index) {
   elements.set(track.id, { row, strip });
   wireTrackControls(track, row); wireTrackControls(track, strip);
   syncTrackControl(track, 'volume', track.volume); syncTrackControl(track, 'pan', track.pan);
+  const start = row.querySelector('[data-control=start]');
+  start.value = (track.start || 0).toFixed(2);
+  start.onfocus = checkpoint;
+  start.onchange = () => {
+    track.start = Math.max(0, Number(start.value) || 0);
+    engine.stop(); renderTracks(); refreshSession();
+    notice(`${track.name} inicia em ${time(track.start)}.`);
+  };
+  const item = row.querySelector('.audio-item');
+  item.style.left = `${engine.duration ? (track.start || 0) / engine.duration * 100 : 0}%`;
+  item.style.width = `${engine.duration ? track.buffer.duration / engine.duration * 100 : 100}%`;
   row.querySelector('.remove').onclick = () => {
+    checkpoint();
     engine.remove(track.id); renderTracks(); refreshSession(); refreshMix();
     notice('Faixa removida. A reprodução foi pausada.');
   };
@@ -263,19 +367,22 @@ async function importFiles(files) {
   if (importing || starting || !files.length) return;
   importing = true; engine.pause(); $('#import').disabled = true; $('#empty-import').disabled = true; refreshSession();
   let added = 0; const errors = [];
+  checkpoint();
   for (const file of files) {
     notice(`Carregando ${file.name}…`);
     try {
       if (file.size > 256 * 1024 * 1024) throw new Error('limite de 256 MB por arquivo');
-      const buffer = await engine.context.decodeAudioData(await file.arrayBuffer());
+      const sourceBytes = await file.arrayBuffer();
+      const buffer = await engine.context.decodeAudioData(sourceBytes.slice(0));
       const bytes = buffer.length * buffer.numberOfChannels * 4;
       const retained = songs.flatMap(song => song.tracks).reduce((sum, track) => sum + track.buffer.length * track.buffer.numberOfChannels * 4, 0);
       if (retained + bytes > 768 * 1024 * 1024) throw new Error('limite de memória da sessão (768 MB de áudio decodificado)');
-      engine.add(buffer, file.name); added++;
+      engine.add(buffer, file.name, { sourceBytes, mimeType: file.type }); added++;
     } catch (error) { errors.push(`${file.name}: ${error.message}`); }
   }
   importing = false; $('#import').disabled = false; $('#empty-import').disabled = false; $('#files').value = '';
   renderTracks(); refreshSession(); refreshMix();
+  if (!added) { undoStack.pop(); updateHistoryButtons(); }
   notice(errors.length ? `${added} faixa(s) importada(s). Falha: ${errors.join(' · ')}` : `${added} faixa(s) importada(s) em ${currentSong().name}. Use “Testar áudio” se não ouvir a reprodução.`);
 }
 
@@ -294,13 +401,151 @@ function navigateSong(direction) {
   if (target) selectSong(target.id);
 }
 
+function bytesToBase64(bytes) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1]);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(new Blob([bytes]));
+  });
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  return bytes.buffer;
+}
+
+async function serializeProject() {
+  const outputSongs = [];
+  for (const song of songs) {
+    const tracks = [];
+    for (const track of song.tracks) {
+      if (!track.sourceBytes) throw new Error(`a faixa “${track.name}” não possui os bytes originais para salvar`);
+      tracks.push({
+        id: track.id, name: track.name, volume: track.volume, pan: track.pan,
+        muted: track.muted, solo: track.solo, start: track.start || 0,
+        mimeType: track.mimeType, audioBase64: await bytesToBase64(track.sourceBytes)
+      });
+    }
+    outputSongs.push({
+      id: song.id, name: song.name, bpm: song.bpm,
+      metronome: song.metronome, markers: song.markers, tracks
+    });
+  }
+  return JSON.stringify({ format: 'palco-project', version: 1, savedAt: new Date().toISOString(), currentSongId, songs: outputSongs });
+}
+
+async function saveProject() {
+  try {
+    notice('Preparando projeto…');
+    const content = await serializeProject();
+    if (window.palcoDesktop) {
+      const result = await window.palcoDesktop.saveProject(content);
+      notice(result.canceled ? 'Salvamento cancelado.' : `Projeto salvo em ${result.path}.`);
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
+    link.download = 'projeto-palco.palco.json'; link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    notice('Projeto exportado.');
+  } catch (error) { notice(`Projeto: ${error.message}`); }
+}
+
+async function loadProjectContent(content) {
+  const project = JSON.parse(content);
+  if (project?.format !== 'palco-project' || project.version !== 1 || !Array.isArray(project.songs) || !project.songs.length) {
+    throw new Error('formato de projeto inválido ou incompatível');
+  }
+  const loadedSongs = [];
+  for (const sourceSong of project.songs) {
+    const song = createSong(String(sourceSong.name || 'Música'));
+    song.id = String(sourceSong.id || crypto.randomUUID());
+    song.bpm = Math.max(30, Math.min(300, Number(sourceSong.bpm) || 120));
+    song.metronome = Boolean(sourceSong.metronome);
+    song.markers = Array.isArray(sourceSong.markers) ? sourceSong.markers.map(marker => ({
+      id: String(marker.id || crypto.randomUUID()), name: String(marker.name || 'M'), time: Math.max(0, Number(marker.time) || 0)
+    })) : [];
+    for (const sourceTrack of sourceSong.tracks || []) {
+      const sourceBytes = base64ToBytes(sourceTrack.audioBase64);
+      if (sourceBytes.byteLength > 256 * 1024 * 1024) throw new Error(`faixa “${sourceTrack.name}” excede 256 MB`);
+      const buffer = await engine.context.decodeAudioData(sourceBytes.slice(0));
+      song.tracks.push({
+        id: String(sourceTrack.id || crypto.randomUUID()), name: String(sourceTrack.name || 'Faixa'), buffer,
+        volume: Math.max(0, Math.min(1, Number(sourceTrack.volume) || 0)),
+        pan: Math.max(-1, Math.min(1, Number(sourceTrack.pan) || 0)),
+        muted: Boolean(sourceTrack.muted), solo: Boolean(sourceTrack.solo),
+        start: Math.max(0, Number(sourceTrack.start) || 0),
+        sourceBytes, mimeType: String(sourceTrack.mimeType || 'application/octet-stream')
+      });
+    }
+    loadedSongs.push(song);
+  }
+  songs = loadedSongs;
+  currentSongId = songs.some(song => song.id === project.currentSongId) ? project.currentSongId : songs[0].id;
+  undoStack.length = 0; redoStack.length = 0;
+  selectSong(currentSongId, true); updateHistoryButtons();
+  notice(`Projeto aberto com ${songs.length} música(s).`);
+}
+
+async function openProject() {
+  try {
+    if (window.palcoDesktop) {
+      const result = await window.palcoDesktop.openProject();
+      if (!result.canceled) await loadProjectContent(result.content);
+      else notice('Abertura cancelada.');
+      return;
+    }
+    $('#project-file').click();
+  } catch (error) { notice(`Projeto: ${error.message}`); }
+}
+
+function newProject() {
+  engine.stop();
+  songs = [createSong('Música 1')]; currentSongId = songs[0].id;
+  undoStack.length = 0; redoStack.length = 0;
+  selectSong(currentSongId, true); updateHistoryButtons();
+  notice('Novo projeto criado.');
+}
+
 $('#files').onchange = event => importFiles([...event.target.files]);
+$('#project-file').onchange = async event => {
+  const [file] = event.target.files;
+  if (!file) return;
+  try { await loadProjectContent(await file.text()); }
+  catch (error) { notice(`Projeto: ${error.message}`); }
+  event.target.value = '';
+};
+$('#new-project').onclick = newProject;
+$('#open-project').onclick = openProject;
+$('#save-project').onclick = saveProject;
+$('#undo').onclick = undo;
+$('#redo').onclick = redo;
+$('#add-marker').onclick = addMarker;
 $('#import').onclick = $('#empty-import').onclick = () => $('#files').click();
 $('#new-song').onclick = () => addSong(true);
 $('#playlist-new-song').onclick = () => addSong(false);
 $('#song-name').onchange = event => {
   currentSong().name = event.target.value.trim() || 'Música sem nome';
   event.target.value = currentSong().name; renderPlaylist();
+};
+$('#song-name').onfocus = checkpoint;
+$('#tempo').onfocus = checkpoint;
+$('#tempo').onchange = event => {
+  const song = currentSong();
+  song.bpm = Math.max(30, Math.min(300, Number(event.target.value) || 120));
+  event.target.value = song.bpm;
+  engine.setTempo(song.bpm, song.metronome);
+  notice(`Tempo do projeto: ${song.bpm} BPM.`);
+};
+$('#metronome').onclick = () => {
+  checkpoint();
+  const song = currentSong(); song.metronome = !song.metronome;
+  engine.setTempo(song.bpm, song.metronome);
+  $('#metronome').classList.toggle('active', song.metronome);
+  $('#metronome').setAttribute('aria-pressed', String(song.metronome));
 };
 $$('.view-tab').forEach(tab => tab.onclick = () => switchView(tab.dataset.view));
 $('#play').onclick = togglePlay;
@@ -322,9 +567,18 @@ $('#test-audio').onclick = async () => {
 };
 
 document.addEventListener('keydown', event => {
-  if (['INPUT', 'BUTTON', 'TEXTAREA', 'SELECT'].includes(event.target.tagName) || event.repeat) return;
+  if (event.repeat) return;
+  const command = event.ctrlKey || event.metaKey;
+  if (command && event.code === 'KeyS') { event.preventDefault(); saveProject(); return; }
+  if (command && event.code === 'KeyO') { event.preventDefault(); openProject(); return; }
+  if (command && event.code === 'KeyN') { event.preventDefault(); newProject(); return; }
+  if (command && event.code === 'KeyZ' && event.shiftKey) { event.preventDefault(); redo(); return; }
+  if (command && event.code === 'KeyZ') { event.preventDefault(); undo(); return; }
+  if (command && event.code === 'KeyY') { event.preventDefault(); redo(); return; }
+  if (['INPUT', 'BUTTON', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) return;
   if (event.code === 'Space') { event.preventDefault(); togglePlay(); }
   if (event.code === 'Escape') engine.stop();
+  if (event.code === 'KeyM') addMarker();
 });
 window.addEventListener('resize', repaint);
 window.addEventListener('beforeunload', event => {
@@ -344,5 +598,7 @@ setInterval(() => {
 }, 40);
 
 engine.setTracks(currentSong().tracks);
+engine.setTempo(currentSong().bpm, currentSong().metronome);
 $('#song-name').value = currentSong().name;
-renderTracks(); refreshSession(); renderPlaylist(); updateAudioState(); loadAudioDevices();
+$('#tempo').value = currentSong().bpm;
+renderTracks(); refreshSession(); renderPlaylist(); updateHistoryButtons(); updateAudioState(); loadAudioDevices();

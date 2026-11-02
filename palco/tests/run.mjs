@@ -136,6 +136,35 @@ try {
     assert.equal(await page.locator('.mixer-strip').first().locator('[data-control=pan]').inputValue(), '-1');
     await page.locator('#master').fill('0.6'); assert.equal(await page.locator('#master-value').textContent(), '60%');
   });
+  await check('Timeline start, markers, tempo, metronome, undo and project export work', async () => {
+    const start = page.locator('.track').first().locator('[data-control=start]');
+    await start.fill('1'); await start.press('Enter');
+    await page.locator('#undo').focus();
+    assert.match(await page.locator('#total').textContent(), /00:05.000/);
+    assert.equal(await start.inputValue(), '1.00');
+    await page.locator('#undo').click();
+    assert.match(await page.locator('#total').textContent(), /00:04.000/);
+    assert.equal(await page.locator('.track').first().locator('[data-control=start]').inputValue(), '0.00');
+
+    await page.locator('#add-marker').click();
+    assert.equal(await page.locator('.marker').count(), 1);
+    await page.locator('#undo').click();
+    assert.equal(await page.locator('.marker').count(), 0);
+
+    await page.locator('#tempo').fill('132'); await page.locator('#tempo').press('Enter');
+    await page.locator('#metronome').click();
+    assert.equal(await page.locator('#tempo').inputValue(), '132');
+    assert.equal(await page.locator('#metronome').getAttribute('aria-pressed'), 'true');
+
+    const downloadPromise = page.waitForEvent('download');
+    await page.locator('#save-project').click();
+    const download = await downloadPromise;
+    const project = JSON.parse(await readFile(await download.path(), 'utf8'));
+    assert.equal(project.format, 'palco-project');
+    assert.equal(project.version, 1);
+    assert.equal(project.songs[0].tracks.length, 2);
+    assert.ok(project.songs[0].tracks[0].audioBase64.length > 1000);
+  });
   await check('Seek and natural end stop without automatically starting another song', async () => {
     await page.locator('#seek').fill('3.7');
     await page.getByRole('button', { name: 'Reproduzir', exact: true }).click();

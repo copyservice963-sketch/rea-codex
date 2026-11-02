@@ -16,12 +16,16 @@
 
   <div class="tool-bar">
     <div class="tool-group">
+      <button id="new-project" class="tool-button" title="Novo projeto (Ctrl+N)">Novo</button>
+      <button id="open-project" class="tool-button" title="Abrir projeto (Ctrl+O)">Abrir</button>
+      <button id="save-project" class="tool-button" title="Salvar projeto (Ctrl+S)">Salvar</button>
+      <input id="project-file" type="file" accept=".json,.palco.json" hidden>
       <button id="new-song" class="tool-button" title="Nova música">＋ Música</button>
       <button id="import" class="tool-button primary" title="Importar faixas">＋ Faixas</button>
       <input id="files" type="file" accept=".wav,.mp3,.ogg,.flac,audio/*" multiple hidden>
     </div>
     <div class="tool-separator"></div>
-    <div class="tool-group history-tools" aria-hidden="true"><button class="icon-button" disabled>↶</button><button class="icon-button" disabled>↷</button><button class="icon-button cut-tool" disabled>CUT</button></div>
+    <div class="tool-group history-tools"><button id="undo" class="icon-button" title="Desfazer (Ctrl+Z)" disabled>↶</button><button id="redo" class="icon-button" title="Refazer (Ctrl+Y)" disabled>↷</button><button id="add-marker" class="tool-button" title="Adicionar marcador na posição atual (M)">＋ Marcador</button></div>
     <div class="spacer"></div>
     <label class="device-control" for="audio-device"><span>SAÍDA DE ÁUDIO</span><select id="audio-device"><option value="default">Dispositivo padrão</option></select></label>
     <button id="refresh-devices" class="icon-button" title="Atualizar dispositivos">↻</button>
@@ -37,12 +41,12 @@
     <section id="arrangement-view" class="view-panel active">
       <div class="project-strip">
         <div><span class="section-label">PROJETO ATUAL</span><input id="song-name" class="song-name" value="Música 1" aria-label="Nome da música"></div>
-        <div class="project-stats"><span id="track-count">0 faixas</span><span id="song-duration">00:00.000</span><span>48 kHz</span></div>
+        <div class="project-stats"><span id="track-count">0 faixas</span><span id="song-duration">00:00.000</span><label>BPM <input id="tempo" type="number" min="30" max="300" value="120" aria-label="Tempo em BPM"></label><button id="metronome" aria-pressed="false" title="Metrônomo">METRÔNOMO</button><span>48 kHz</span></div>
       </div>
 
       <section class="arrange-window" aria-label="Arranjo de multitracks">
         <aside class="track-panel-title"><span>TCP</span><small>CONTROLES DE FAIXA</small></aside>
-        <div class="timeline-ruler"><div id="ruler" class="ruler"></div></div>
+        <div class="timeline-ruler"><div id="ruler" class="ruler"></div><div id="markers" class="markers" aria-label="Marcadores"></div></div>
         <div id="track-area" class="track-area">
           <div id="empty" class="empty">
             <div class="empty-wave">▂ ▅ ▃ ▇ ▅ ▂ ▆ ▃ ▅</div>

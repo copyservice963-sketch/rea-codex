@@ -1,4 +1,5 @@
-const { app, BrowserWindow, session, dialog } = require('electron');
+const { app, BrowserWindow, session, dialog, ipcMain } = require('electron');
+const fs = require('node:fs/promises');
 const path = require('node:path');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -19,7 +20,10 @@ function openWindow(splash) {
     width: 1400, height: 930, minWidth: 980, minHeight: 700,
     backgroundColor: '#171717', title: 'Palco Multitracks',
     autoHideMenuBar: true, show: false,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+    webPreferences: {
+      contextIsolation: true, nodeIntegration: false, sandbox: true,
+      preload: path.join(__dirname, 'preload.cjs')
+    }
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -42,6 +46,23 @@ function openWindow(splash) {
 }
 
 app.whenReady().then(() => {
+  ipcMain.handle('project:save', async (_event, content) => {
+    const result = await dialog.showSaveDialog({
+      title: 'Salvar projeto Palco', defaultPath: 'projeto-palco.palco.json',
+      filters: [{ name: 'Projeto Palco', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    await fs.writeFile(result.filePath, content, 'utf8');
+    return { canceled: false, path: result.filePath };
+  });
+  ipcMain.handle('project:open', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Abrir projeto Palco', properties: ['openFile'],
+      filters: [{ name: 'Projeto Palco', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePaths[0]) return { canceled: true };
+    return { canceled: false, path: result.filePaths[0], content: await fs.readFile(result.filePaths[0], 'utf8') };
+  });
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => callback(permission === 'speaker-selection'));
   session.defaultSession.setPermissionCheckHandler((_webContents, permission) => permission === 'speaker-selection');
   const splash = openSplash();

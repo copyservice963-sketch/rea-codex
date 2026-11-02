@@ -11,7 +11,7 @@ const source = path.join(
 const destination = path.join(
   projectDirectory,
   '..',
-  'Palco-Multitracks-Windows-x64-Setup.exe'
+  `Palco-Multitracks-${version}-Windows-x64-Setup.exe`
 );
 
 async function main() {
