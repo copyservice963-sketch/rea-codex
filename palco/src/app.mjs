@@ -23,6 +23,7 @@ const MAX_SONGS = 128;
 const MAX_TRACKS = 256;
 const MAX_MARKERS = 2000;
 const THEMES = new Set(['graphite', 'midnight', 'amber']);
+const DEFAULTS = Object.freeze({ volume: 1, pan: 0, start: 0, master: 0.8, tempo: 120 });
 let theme = THEMES.has(localStorage.getItem('palco-theme')) ? localStorage.getItem('palco-theme') : 'graphite';
 let dirty = false;
 let savedFingerprint = null;
@@ -102,6 +103,27 @@ function finishFieldEdit(element) {
   if (changed) pushHistory(element._historyState);
   element._historyState = null;
   element._historyValue = null;
+}
+
+function addDefaultReset(element, read, defaultValue, apply, label) {
+  element.title = `${element.title ? `${element.title} · ` : ''}Duplo clique: restaurar ${label}`;
+  element.ondblclick = event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const historyState = element._historyState || captureState();
+    if (Math.abs(Number(read()) - defaultValue) < 0.0001) {
+      element._historyState = null;
+      element._historyValue = null;
+      notice(`${label} já está no padrão.`);
+      return;
+    }
+    pushHistory(historyState);
+    element._historyState = null;
+    element._historyValue = null;
+    apply(defaultValue);
+    refreshDirty();
+    notice(`${label} restaurado ao padrão.`);
+  };
 }
 
 function setDirty(value) {
@@ -435,11 +457,17 @@ function wireTrackControls(track, container) {
   volume.onfocus = volume.onpointerdown = () => beginFieldEdit(volume);
   volume.oninput = () => { track.volume = Number(volume.value); syncTrackControl(track, 'volume', track.volume); engine.updateMix(); };
   volume.onchange = () => finishFieldEdit(volume);
+  addDefaultReset(volume, () => track.volume, DEFAULTS.volume, value => {
+    track.volume = value; syncTrackControl(track, 'volume', value); engine.updateMix();
+  }, `volume de ${track.name}`);
   const pan = container.querySelector('[data-control=pan]');
   pan.setAttribute('aria-label', `Pan ${track.name}`);
   pan.onfocus = pan.onpointerdown = () => beginFieldEdit(pan);
   pan.oninput = () => { track.pan = Number(pan.value); syncTrackControl(track, 'pan', track.pan); engine.updateMix(); };
   pan.onchange = () => finishFieldEdit(pan);
+  addDefaultReset(pan, () => track.pan, DEFAULTS.pan, value => {
+    track.pan = value; syncTrackControl(track, 'pan', value); engine.updateMix();
+  }, `pan de ${track.name}`);
 }
 
 function moveTrack(track, direction) {
@@ -501,6 +529,9 @@ function addRow(track, index) {
     engine.stop(); renderTracks(); refreshSession();
     notice(`${track.name} inicia em ${time(track.start)}.`);
   };
+  addDefaultReset(start, () => track.start || 0, DEFAULTS.start, value => {
+    track.start = value; engine.stop(); renderTracks(); refreshSession();
+  }, `início de ${track.name}`);
   const item = row.querySelector('.audio-item');
   item.style.left = `${engine.duration ? (track.start || 0) / engine.duration * 100 : 0}%`;
   item.style.width = `${engine.duration ? track.buffer.duration / engine.duration * 100 : 100}%`;
@@ -805,6 +836,10 @@ $('#tempo').onchange = event => {
   engine.setTempo(song.bpm, song.metronome);
   notice(`Tempo do projeto: ${song.bpm} BPM.`);
 };
+addDefaultReset($('#tempo'), () => currentSong().bpm, DEFAULTS.tempo, value => {
+  const song = currentSong(); song.bpm = value; $('#tempo').value = value;
+  engine.setTempo(song.bpm, song.metronome);
+}, 'tempo');
 $('#metronome').onclick = () => {
   checkpoint();
   const song = currentSong(); song.metronome = !song.metronome;
@@ -818,11 +853,20 @@ $('#stop').onclick = () => engine.stop();
 $('#previous-song').onclick = () => navigateSong(-1);
 $('#next-song').onclick = () => navigateSong(1);
 $('#seek').oninput = event => engine.seek(Number(event.target.value)).catch(showError);
+$('#seek').title = 'Duplo clique: voltar ao início';
+$('#seek').ondblclick = event => {
+  event.preventDefault();
+  engine.seek(0).then(() => notice('Posição restaurada ao início.')).catch(showError);
+};
 $('#master').oninput = event => {
   engine.setMaster(Number(event.target.value)); $('#master-value').textContent = `${Math.round(engine.masterVolume * 100)}%`;
 };
 $('#master').onfocus = $('#master').onpointerdown = event => beginFieldEdit(event.target);
 $('#master').onchange = event => finishFieldEdit(event.target);
+addDefaultReset($('#master'), () => engine.masterVolume, DEFAULTS.master, value => {
+  engine.setMaster(value); $('#master').value = value;
+  $('#master-value').textContent = `${Math.round(value * 100)}%`;
+}, 'volume master');
 $('#audio-device').onchange = async event => {
   try { await engine.setOutputDevice(event.target.value); await engine.ensureReady(); updateAudioState(); notice(`Saída selecionada: ${event.target.selectedOptions[0].text}.`); }
   catch (error) { showError(error); }

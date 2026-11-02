@@ -146,6 +146,50 @@ try {
     await page.screenshot({ path: resolve(output, 'theme-amber.png'), fullPage: true });
     await page.locator('#theme-select').selectOption('graphite');
   });
+  await check('Double click restores defaults and the touch layout fits a phone viewport', async () => {
+    const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    const mobileErrors = []; mobile.on('pageerror', error => mobileErrors.push(error.message));
+    await mobile.goto(origin + '/index.html');
+    await mobile.locator('#files').setInputFiles({ name: 'Mobile.wav', mimeType: 'audio/wav', buffer: wav(330) });
+    await mobile.waitForFunction(() => document.querySelector('.track'));
+
+    const first = mobile.locator('.track').first();
+    await first.locator('[data-control=volume]').fill('0.25'); await first.locator('[data-control=volume]').blur();
+    await first.locator('[data-control=pan]').fill('0.75'); await first.locator('[data-control=pan]').blur();
+    await first.locator('[data-control=volume]').dispatchEvent('dblclick');
+    await first.locator('[data-control=pan]').dispatchEvent('dblclick');
+    assert.equal(await first.locator('[data-control=volume]').inputValue(), '1');
+    assert.equal(await first.locator('[data-control=pan]').inputValue(), '0');
+    await mobile.locator('#undo').click(); await mobile.locator('#undo').click();
+    assert.equal(await first.locator('[data-control=volume]').inputValue(), '0.25');
+    assert.equal(await first.locator('[data-control=pan]').inputValue(), '0.75');
+    await mobile.locator('#redo').click(); await mobile.locator('#redo').click();
+
+    await first.locator('[data-control=start]').fill('1.25');
+    await first.locator('[data-control=start]').press('Enter');
+    await mobile.locator('.track').first().locator('[data-control=start]').dispatchEvent('dblclick');
+    assert.equal(await mobile.locator('.track').first().locator('[data-control=start]').inputValue(), '0.00');
+
+    await mobile.locator('#master').fill('0.3');
+    await mobile.locator('#master').dispatchEvent('dblclick');
+    assert.equal(await mobile.locator('#master').inputValue(), '0.8');
+    await mobile.locator('#tempo').fill('155'); await mobile.locator('#tempo').press('Enter');
+    await mobile.locator('#tempo').dispatchEvent('dblclick');
+    assert.equal(await mobile.locator('#tempo').inputValue(), '120');
+
+    const layout = await mobile.evaluate(() => ({
+      viewport: innerWidth,
+      pageWidth: document.documentElement.scrollWidth,
+      radius: parseFloat(getComputedStyle(document.querySelector('.menu-bar')).borderRadius),
+      transportVisible: document.querySelector('.transport').getBoundingClientRect().bottom <= innerHeight
+    }));
+    assert.ok(layout.pageWidth <= layout.viewport, `layout horizontal: ${layout.pageWidth} > ${layout.viewport}`);
+    assert.ok(layout.radius >= 14);
+    assert.equal(layout.transportVisible, true);
+    assert.deepEqual(mobileErrors, []);
+    await mobile.screenshot({ path: resolve(output, 'mobile-session.png'), fullPage: true });
+    await mobile.close();
+  });
   await check('Playback advances, pause holds position, resume continues, stop resets', async () => {
     await page.getByRole('button', { name: 'Reproduzir', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('#position').textContent >= '00:00.200');

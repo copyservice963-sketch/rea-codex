@@ -62,3 +62,16 @@ O guia rápido e o histórico de versões que acompanham o instalador foram extr
 | Renderização | mix, stems, consolidação e conversão | pendente |
 
 Essa matriz é uma especificação de comportamento, não uma alegação de equivalência. Uma implementação completa exige várias versões, testes no Windows e decisões próprias de arquitetura. O Palco não usa código, ícones, temas, nomes de marca, plugins ou mecanismos de licença extraídos do alvo.
+
+## Ampliação da investigação para a versão 0.5.0
+
+O instalador recebido novamente em 2 de novembro de 2026 tem 17.192.416 bytes e SHA-256 `a343286bd67d8515b561e5c6b7cc284a8d258d87a73f5518ec2e233d46ff9755`. Portanto, é o mesmo alvo das análises anteriores. A extração não foi repetida e o `reaper.exe` já autenticado por digest foi reutilizado.
+
+A CLI oficial REA 6.5.0 acrescentou duas leituras estáticas do executável extraído:
+
+- `inspect-with-objdump symbols`, evidência `ev_c6410f4bcb653de1cd9c5d585769f2ffa08fa7cd15d18e4c85d8815018c39905`, observou o formato `pei-x86-64` e uma tabela sem símbolos;
+- `inspect-with-objdump relocations`, evidência `ev_6fc52c5d38ec114c73a7faf6b950ca075765394528ce5106ef2498d162599a66`, terminou sem relocações exibidas.
+
+Nas duas operações, o digest anterior e posterior permaneceu `43293d1e6b51b7e27d53a09cee6cfcfd746438cf7f3866969b99cd1afa0916fc`, confirmando que a leitura não alterou o arquivo. A ausência de símbolos e de linhas na saída de relocações limita essa rota; ela não prova ausência de nomes ou resolução dinâmica em memória. Como nenhum Ghidra, IDA, Hopper ou provedor nativo profundo está configurado, corpos de funções, chamadas e pseudocódigo continuam desconhecidos.
+
+A interface 0.5.0 é uma decisão de produto próprio: superfícies em cartões arredondados, alvos de toque maiores, adaptação para janelas a partir de 360 px e transporte reorganizado em telas estreitas. O duplo clique restaura volume de faixa para 100%, pan para o centro, início da faixa para zero, volume master para 80%, BPM para 120 e o cursor para o começo. Esses valores e comportamentos pertencem ao Palco e têm cobertura de testes própria.
