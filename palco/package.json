@@ -9,7 +9,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node tests/run.mjs",
-    "dist:win": "electron-builder --win nsis --x64"
+    "dist:win": "electron-builder --win nsis --x64 && node build/copy-installer.cjs"
   },
   "devDependencies": {
     "electron": "45.2.1",

@@ -1,1 +1,2 @@
 palco/release/*.exe filter=lfs diff=lfs merge=lfs -text
+Palco-Multitracks-Windows-x64-Setup.exe filter=lfs diff=lfs merge=lfs -text

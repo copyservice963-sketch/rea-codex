@@ -1,4 +1,16 @@
-# REA + Codex
+# Palco Multitracks
+
+## Baixar para Windows
+
+[**Baixar o instalador mais recente do Palco Multitracks**](./Palco-Multitracks-Windows-x64-Setup.exe?raw=1)
+
+O arquivo acima fica sempre na página inicial com o mesmo nome. Cada novo build substitui esse arquivo pela versão mais recente. A versão atual é a **0.2.0**, para Windows 10 ou posterior em 64 bits.
+
+O código-fonte e os instaladores identificados por versão estão na pasta [`palco`](./palco/).
+
+---
+
+## REA + Codex
 
 Repositório de trabalho pessoal para projetos com REA e Codex. O REA é instalado separadamente no computador onde o Codex é executado; criar ou conectar este repositório no GitHub não instala um servidor MCP local no Codex da web.
 
